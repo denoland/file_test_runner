@@ -4,14 +4,18 @@ File-based test runner for running tests found in files via `cargo test`.
 
 This does two main steps:
 
-1. Collects all the tests from the file system (`file_test_runner::collect_tests`).
+1. Collects all the tests from the file system
+   (`file_test_runner::collect_tests`).
 1. Runs all the tests with a custom test runner (`file_test_runner::run_tests`).
+
+The files it collects may be in any format. It's up to you to decide how they
+should be structured.
 
 ## Setup
 
 1. Add a `[[test]]` section to your Cargo.toml:
 
-   ```
+   ```toml
    [[test]]
    name = "specs"
    path = "tests/spec_test.rs"
@@ -21,25 +25,45 @@ This does two main steps:
 2. Add a `tests/spec_test.rs` file to run the tests with a main function:
 
    ```rs
-   pub fn main() {
-     file_test_runner::collect_and_run_tests(
-       file_test_runner::CollectOptions {
-        // ...
-       },
-       file_test_runner::RunOptions {
-        // ...
-       },
-       Arc::new(|test| {
-         // ...custom function to run the test goes here...
-         // The `test` object only contains the test name and
-         // the path to the file on the file system which you can
-         // then use to determine how to run your test
+   use file_test_runner::*;
 
-         // or return `Failed` with the test output
-         file_test_runner::TestResult::Passed
+   fn main() {
+     collect_and_run_tests(
+       CollectOptions {
+         base: "tests/specs".into(),
+         strategy: FileCollectionStrategy::TestPerFile {
+          file_pattern: None
+         },
+         root_category_name: "specs".to_string(),
+         filter_override: None,
+       },
+       RunOptions {
+         parallel: false,
+       },
+       // custom function to run the test...
+       Arc::new(|test| {
+         // do something like this, or do some checks yourself and
+         // return a value like TestResult::Passed
+         TestResult::from_maybe_panic(AssertUnwindSafe(|| {
+          run_test(test);
+         }))
        })
      )
    }
+
+   // The `test` object only contains the test name and
+   // the path to the file on the file system which you can
+   // then use to determine how to run your test
+   fn run_test(test: &CollectedTest) {
+     // helper function to get the text
+     let file_text = test.read_to_string().unwrap();
+
+     // now you may do whatever with the file text and
+     // assert it using assert_eq! or whatever
+   }
    ```
 
-3. Run `cargo test` to run the tests. Filtering should work OOTB.
+3. Add some files to the `tests/specs` directory or within sub directories of
+   that directory.
+
+4. Run `cargo test` to run the tests. Filtering should work OOTB.
