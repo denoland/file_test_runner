@@ -4,12 +4,19 @@ File-based test runner for running tests found in files via `cargo test`.
 
 This does two main steps:
 
-1. Collects all the tests from the file system
+1. Collects all files from a specified directory using a provided strategy
    (`file_test_runner::collect_tests`).
-1. Runs all the tests with a custom test runner (`file_test_runner::run_tests`).
+1. Runs all the files as tests with a custom test runner
+   (`file_test_runner::run_tests`).
 
 The files it collects may be in any format. It's up to you to decide how they
 should be structured.
+
+## Examples
+
+- https://github.com/denoland/deno_doc/blob/main/tests/specs_test.rs
+- https://github.com/denoland/deno_graph/blob/main/tests/specs_test.rs
+- https://github.com/denoland/deno/tree/main/tests/specs
 
 ## Setup
 
