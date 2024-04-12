@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use deno_terminal::colors;
 use regex::Regex;
 use thiserror::Error;
 
@@ -86,7 +87,7 @@ pub enum FileCollectionStrategy {
   },
 }
 
-pub struct CollectTestsOptions {
+pub struct CollectOptions {
   pub base: PathBuf,
   pub strategy: FileCollectionStrategy,
   /// Name of the category to use at the top level.
@@ -116,6 +117,16 @@ impl PathedIoError {
   }
 }
 
+pub fn collect_tests_or_exit(options: CollectOptions) -> CollectedTestCategory {
+  match collect_tests(options) {
+    Ok(category) => category,
+    Err(err) => {
+      eprintln!("{}: {}", colors::red_bold("error"), err);
+      std::process::exit(1);
+    }
+  }
+}
+
 #[derive(Debug, Error)]
 pub enum CollectTestsError {
   #[error(transparent)]
@@ -134,7 +145,7 @@ pub enum CollectTestsError {
 }
 
 pub fn collect_tests(
-  options: CollectTestsOptions,
+  options: CollectOptions,
 ) -> Result<CollectedTestCategory, CollectTestsError> {
   let mut category = CollectedTestCategory {
     name: options.root_category_name,
@@ -173,7 +184,7 @@ pub fn collect_tests(
 
 fn collect_test_per_file(
   category_name: &str,
-  dir_path: &PathBuf,
+  dir_path: &Path,
   pattern: Option<&Regex>,
 ) -> Result<Vec<CollectedCategoryOrTest>, CollectTestsError> {
   let mut tests = vec![];
@@ -218,7 +229,7 @@ fn collect_test_per_file(
 
 fn collect_test_per_directory(
   category_name: &str,
-  dir_path: &PathBuf,
+  dir_path: &Path,
   dir_test_file_name: &str,
 ) -> Result<Vec<CollectedCategoryOrTest>, CollectTestsError> {
   let mut tests = vec![];
@@ -269,7 +280,7 @@ fn collect_test_per_directory(
   // (ex. `__test__.json` instead of `__test__.jsonc` in Deno's case)
   if !found_dir {
     return Err(CollectTestsError::MissingDirectoryTestFile {
-      dir_path: dir_path.clone(),
+      dir_path: dir_path.to_path_buf(),
       file_name: dir_test_file_name.to_string(),
     });
   }
@@ -284,8 +295,10 @@ fn read_dir_entries(
     .map_err(|err| PathedIoError::new(dir_path, err))?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|err| PathedIoError::new(dir_path, err))?;
-  entries.retain(|e| e.file_name() != ".git");
-  entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+  entries.retain(|e| {
+    e.file_name() != ".git" && e.file_name().to_ascii_lowercase() != "readme.md"
+  });
+  entries.sort_by_key(|a| a.file_name());
   Ok(entries)
 }
 
