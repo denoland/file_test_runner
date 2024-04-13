@@ -38,7 +38,13 @@ thread_local! {
   static LOCAL_PANIC_HOOK: RefCell<Option<PanicHook>> = RefCell::new(None);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct TestStepResult {
+  pub name: String,
+  pub result: TestResult,
+}
+
+#[derive(Debug, Clone)]
 pub enum TestResult {
   /// Test passed.
   Passed,
@@ -46,9 +52,19 @@ pub enum TestResult {
   Ignored,
   /// Test failed, returning the captured output of the test.
   Failed { output: Vec<u8> },
+  /// Multiple test steps were run.
+  Steps(Vec<TestStepResult>),
 }
 
 impl TestResult {
+  pub fn is_failed(&self) -> bool {
+    match self {
+      TestResult::Passed | TestResult::Ignored => false,
+      TestResult::Failed { .. } => true,
+      TestResult::Steps(steps) => steps.iter().any(|s| s.result.is_failed()),
+    }
+  }
+
   /// Allows using a closure that may panic, capturing the panic message and
   /// returning it as a TestResult::Failed.
   ///
@@ -201,30 +217,17 @@ fn run_tests_for_category(
         }
       }
       let (test, duration, result) = runner.receive_result();
-      let duration_display =
-        colors::gray(format!("({}ms)", duration.as_millis()));
-      match result {
-        TestResult::Passed => {
-          eprintln!(
-            "test {} ... {} {}",
-            test.name,
-            colors::green_bold("ok"),
-            duration_display
-          );
-        }
-        TestResult::Ignored => {
-          // output nothing
-        }
-        TestResult::Failed { output } => {
-          eprintln!(
-            "test {} ... {} {}",
-            test.name,
-            colors::green_bold("fail"),
-            duration_display
-          );
-          context.failures.push(Failure { test, output })
-        }
+      let is_failure = result.is_failed();
+      let (runner_output, failure_output) =
+        build_end_test_message(result, duration);
+      eprint!("test {} ... {}", test.name, runner_output);
+      if is_failure {
+        context.failures.push(Failure {
+          test,
+          output: failure_output,
+        });
       }
+
       pending -= 1;
       thread_pool_pending += 1;
     }
@@ -233,25 +236,110 @@ fn run_tests_for_category(
       eprint!("test {} ... ", test.name);
       let start = Instant::now();
       let result = (context.run_test)(test);
-      let duration_display =
-        colors::gray(format!("({}ms)", start.elapsed().as_millis()));
-      match result {
+      let is_failure = result.is_failed();
+      let (runner_output, failure_output) =
+        build_end_test_message(result, start.elapsed());
+      eprint!("{}", runner_output);
+      if is_failure {
+        context.failures.push(Failure {
+          test: (*test).clone(),
+          output: failure_output,
+        });
+      }
+    }
+  }
+}
+
+fn build_end_test_message(
+  result: TestResult,
+  duration: Duration,
+) -> (String, Vec<u8>) {
+  fn output_steps(
+    indent: &str,
+    steps: &[TestStepResult],
+    runner_output: &mut String,
+    failure_output: &mut Vec<u8>,
+  ) {
+    for step in steps {
+      match &step.result {
         TestResult::Passed => {
-          eprintln!("{} {}", colors::green_bold("ok"), duration_display);
+          runner_output.push_str(&format!(
+            "{}{} {}\n",
+            indent,
+            step.name,
+            colors::green_bold("ok"),
+          ));
         }
         TestResult::Ignored => {
-          eprintln!("{}", colors::gray("ignored"));
+          runner_output.push_str(&format!(
+            "{}{} {}\n",
+            indent,
+            step.name,
+            colors::gray("ignored"),
+          ));
         }
         TestResult::Failed { output } => {
-          eprintln!("{} {}", colors::green_bold("fail"), duration_display);
-          context.failures.push(Failure {
-            test: (*test).clone(),
-            output,
-          })
+          runner_output.push_str(&format!(
+            "{}{} {}\n",
+            indent,
+            step.name,
+            colors::red_bold("fail")
+          ));
+          if !failure_output.is_empty() {
+            failure_output.push(b'\n');
+          }
+          failure_output.extend(output);
+        }
+        TestResult::Steps(steps) => {
+          runner_output.push_str(&format!("{}{}\n", indent, step.name));
+          if steps.is_empty() {
+            runner_output.push_str(&format!(
+              "{}  {}\n",
+              indent,
+              colors::gray("<no steps>")
+            ));
+          } else {
+            output_steps(
+              &format!("{}  ", indent),
+              steps,
+              runner_output,
+              failure_output,
+            );
+          }
         }
       }
     }
   }
+
+  let mut runner_output = String::new();
+  let duration_display = colors::gray(format!("({}ms)", duration.as_millis()));
+  let mut failure_output = Vec::new();
+  match result {
+    TestResult::Passed => {
+      runner_output.push_str(&format!(
+        "{} {}\n",
+        colors::green_bold("ok"),
+        duration_display
+      ));
+    }
+    TestResult::Ignored => {
+      runner_output.push_str(&format!("{}\n", colors::gray("ignored")));
+    }
+    TestResult::Failed { output } => {
+      runner_output.push_str(&format!(
+        "{} {}\n",
+        colors::red_bold("fail"),
+        duration_display
+      ));
+      failure_output = output;
+    }
+    TestResult::Steps(steps) => {
+      runner_output.push_str(&format!("{}\n", duration_display));
+      output_steps("  ", &steps, &mut runner_output, &mut failure_output);
+    }
+  }
+
+  (runner_output, failure_output)
 }
 
 #[derive(Default)]
@@ -330,5 +418,106 @@ impl ThreadPoolTestRunner {
     let data = self.receiver.recv().unwrap();
     self.pending_tests.lock().pending.remove(&data.0.name);
     data
+  }
+}
+
+#[cfg(test)]
+mod test {
+  use deno_terminal::colors;
+
+  use super::*;
+
+  #[test]
+  fn test_build_end_test_message_passed() {
+    assert_eq!(
+      build_end_test_message(
+        super::TestResult::Passed,
+        std::time::Duration::from_millis(100),
+      )
+      .0,
+      format!("{} {}\n", colors::green_bold("ok"), colors::gray("(100ms)"))
+    );
+  }
+
+  #[test]
+  fn test_build_end_test_message_failed() {
+    let (message, failure_output) = build_end_test_message(
+      super::TestResult::Failed {
+        output: b"error".to_vec(),
+      },
+      std::time::Duration::from_millis(100),
+    );
+    assert_eq!(
+      message,
+      format!("{} {}\n", colors::red_bold("fail"), colors::gray("(100ms)"))
+    );
+    assert_eq!(failure_output, b"error");
+  }
+
+  #[test]
+  fn test_build_end_test_message_ignored() {
+    assert_eq!(
+      build_end_test_message(
+        super::TestResult::Ignored,
+        std::time::Duration::from_millis(10),
+      )
+      .0,
+      format!("{}\n", colors::gray("ignored"))
+    );
+  }
+
+  #[test]
+  fn test_build_end_test_message_steps() {
+    let (message, failure_output) = build_end_test_message(
+      super::TestResult::Steps(vec![
+        super::TestStepResult {
+          name: "step1".to_string(),
+          result: super::TestResult::Passed,
+        },
+        super::TestStepResult {
+          name: "step2".to_string(),
+          result: super::TestResult::Failed {
+            output: b"error1".to_vec(),
+          },
+        },
+        super::TestStepResult {
+          name: "step3".to_string(),
+          result: super::TestResult::Failed {
+            output: b"error2".to_vec(),
+          },
+        },
+        super::TestStepResult {
+          name: "step4".to_string(),
+          result: super::TestResult::Steps(vec![
+            super::TestStepResult {
+              name: "sub-step1".to_string(),
+              result: super::TestResult::Passed,
+            },
+            super::TestStepResult {
+              name: "sub-step2".to_string(),
+              result: super::TestResult::Failed {
+                output: b"error3".to_vec(),
+              },
+            },
+          ]),
+        },
+      ]),
+      std::time::Duration::from_millis(10),
+    );
+
+    assert_eq!(
+      message,
+      format!(
+        "{}\n  step1 {}\n  step2 {}\n  step3 {}\n  step4\n    sub-step1 {}\n    sub-step2 {}\n",
+        colors::gray("(10ms)"),
+        colors::green_bold("ok"),
+        colors::red_bold("fail"),
+        colors::red_bold("fail"),
+        colors::green_bold("ok"),
+        colors::red_bold("fail"),
+      )
+    );
+
+    assert_eq!(failure_output, b"error1\nerror2\nerror3");
   }
 }
