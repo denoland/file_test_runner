@@ -10,9 +10,9 @@ use std::time::Instant;
 use deno_terminal::colors;
 use parking_lot::Mutex;
 
-use crate::CollectedCategoryOrTest;
-use crate::CollectedTest;
-use crate::CollectedTestCategory;
+use crate::collection::CollectedCategoryOrTest;
+use crate::collection::CollectedTest;
+use crate::collection::CollectedTestCategory;
 
 pub type RunTestFunc =
   Arc<dyn (Fn(&CollectedTest) -> TestResult) + Send + Sync>;
