@@ -3,8 +3,6 @@
 use core::panic;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -30,7 +28,7 @@ struct Context {
   run_test: RunTestFunc,
 }
 
-static GLOBAL_PANIC_HOOK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static GLOBAL_PANIC_HOOK_COUNT: Mutex<usize> = Mutex::new(0);
 
 type PanicHook = Box<dyn Fn(&std::panic::PanicInfo) + Sync + Send>;
 
@@ -72,15 +70,21 @@ impl TestResult {
   pub fn from_maybe_panic(
     func: impl FnOnce() + std::panic::UnwindSafe,
   ) -> Self {
-    if GLOBAL_PANIC_HOOK_COUNT.fetch_add(1, Ordering::SeqCst) == 0 {
-      let _ = std::panic::take_hook();
-      std::panic::set_hook(Box::new(|info| {
-        LOCAL_PANIC_HOOK.with(|hook| {
-          if let Some(hook) = &*hook.borrow() {
-            hook(info);
-          }
-        });
-      }));
+    // increment the panic hook
+    {
+      let mut hook_count = GLOBAL_PANIC_HOOK_COUNT.lock();
+      if *hook_count == 0 {
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|info| {
+          LOCAL_PANIC_HOOK.with(|hook| {
+            if let Some(hook) = &*hook.borrow() {
+              hook(info);
+            }
+          });
+        }));
+      }
+      *hook_count += 1;
+      drop(hook_count); // explicit for clarity, drop after setting the hook
     }
 
     let panic_message = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -96,8 +100,14 @@ impl TestResult {
 
     let result = std::panic::catch_unwind(func);
 
-    if GLOBAL_PANIC_HOOK_COUNT.fetch_sub(1, Ordering::SeqCst) == 1 {
-      let _ = std::panic::take_hook();
+    // decrement the panic hook
+    {
+      let mut hook_count = GLOBAL_PANIC_HOOK_COUNT.lock();
+      *hook_count -= 1;
+      if *hook_count == 0 {
+        let _ = std::panic::take_hook();
+      }
+      drop(hook_count); // explicit for clarity, drop after taking the hook
     }
 
     result
