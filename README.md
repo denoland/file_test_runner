@@ -32,16 +32,20 @@ should be structured.
 2. Add a `tests/spec_test.rs` file to run the tests with a main function:
 
    ```rs
-   use file_test_runner::*;
+   use file_test_runner::collect_and_run_tests;
+   use file_test_runner::collection::CollectedTest;
+   use file_test_runner::collection::CollectOptions;
+   use file_test_runner::collection::strategies::TestPerFileCollectionStrategy;
+   use file_test_runner::RunOptions;
+   use file_test_runner::TestResult;
 
    fn main() {
      collect_and_run_tests(
        CollectOptions {
          base: "tests/specs".into(),
-         strategy: FileCollectionStrategy::TestPerFile {
+         strategy: Box::new(TestPerFileCollectionStrategy {
           file_pattern: None
-         },
-         root_category_name: "specs".to_string(),
+         }),
          filter_override: None,
        },
        RunOptions {
