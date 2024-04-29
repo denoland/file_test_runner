@@ -166,6 +166,11 @@ pub fn run_tests(
       eprintln!("Test file: {}", failure.test.path.display());
       eprintln!();
     }
+    eprintln!("failures:");
+    for failure in &context.failures {
+      eprintln!("    {}", failure.test.name);
+    }
+    eprintln!();
     panic!("{} failed of {}", context.failures.len(), total_tests);
   } else {
     eprintln!("{} tests passed", total_tests);
