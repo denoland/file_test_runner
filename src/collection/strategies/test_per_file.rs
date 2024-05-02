@@ -50,7 +50,7 @@ impl FileCollectionStrategy<()> for TestPerFileCollectionStrategy {
             tests.push(CollectedCategoryOrTest::Category(
               CollectedTestCategory {
                 name: category_name,
-                directory_path: path,
+                path,
                 children,
               },
             ));
@@ -85,7 +85,7 @@ impl FileCollectionStrategy<()> for TestPerFileCollectionStrategy {
       collect_test_per_file(&category_name, base, pattern.as_ref())?;
     Ok(CollectedTestCategory {
       name: category_name.to_string(),
-      directory_path: base.to_path_buf(),
+      path: base.to_path_buf(),
       children,
     })
   }

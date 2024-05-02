@@ -37,7 +37,7 @@ thread_local! {
 }
 
 #[derive(Debug, Clone)]
-pub struct TestSubTestResult {
+pub struct SubTestResult {
   pub name: String,
   pub result: TestResult,
 }
@@ -51,7 +51,7 @@ pub enum TestResult {
   /// Test failed, returning the captured output of the test.
   Failed { output: Vec<u8> },
   /// Multiple sub tests were run.
-  SubTests(Vec<TestSubTestResult>),
+  SubTests(Vec<SubTestResult>),
 }
 
 impl TestResult {
@@ -276,7 +276,7 @@ fn build_end_test_message(
 ) -> (String, Vec<u8>) {
   fn output_sub_tests(
     indent: &str,
-    sub_tests: &[TestSubTestResult],
+    sub_tests: &[SubTestResult],
     runner_output: &mut String,
     failure_output: &mut Vec<u8>,
   ) {
@@ -501,30 +501,30 @@ mod test {
   fn test_build_end_test_message_sub_tests() {
     let (message, failure_output) = build_end_test_message(
       super::TestResult::SubTests(vec![
-        super::TestSubTestResult {
+        super::SubTestResult {
           name: "step1".to_string(),
           result: super::TestResult::Passed,
         },
-        super::TestSubTestResult {
+        super::SubTestResult {
           name: "step2".to_string(),
           result: super::TestResult::Failed {
             output: b"error1".to_vec(),
           },
         },
-        super::TestSubTestResult {
+        super::SubTestResult {
           name: "step3".to_string(),
           result: super::TestResult::Failed {
             output: b"error2".to_vec(),
           },
         },
-        super::TestSubTestResult {
+        super::SubTestResult {
           name: "step4".to_string(),
           result: super::TestResult::SubTests(vec![
-            super::TestSubTestResult {
+            super::SubTestResult {
               name: "sub-step1".to_string(),
               result: super::TestResult::Passed,
             },
-            super::TestSubTestResult {
+            super::SubTestResult {
               name: "sub-step2".to_string(),
               result: super::TestResult::Failed {
                 output: b"error3".to_vec(),

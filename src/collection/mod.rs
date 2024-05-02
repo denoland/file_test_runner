@@ -12,15 +12,15 @@ use self::strategies::FileCollectionStrategy;
 pub mod strategies;
 
 #[derive(Debug, Clone)]
-pub enum CollectedCategoryOrTest<T> {
+pub enum CollectedCategoryOrTest<T = ()> {
   Category(CollectedTestCategory<T>),
   Test(CollectedTest<T>),
 }
 
 #[derive(Debug, Clone)]
-pub struct CollectedTestCategory<T> {
+pub struct CollectedTestCategory<T = ()> {
   pub name: String,
-  pub directory_path: PathBuf,
+  pub path: PathBuf,
   pub children: Vec<CollectedCategoryOrTest<T>>,
 }
 
@@ -65,7 +65,7 @@ impl<T> CollectedTestCategory<T> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CollectedTest<T> {
+pub struct CollectedTest<T = ()> {
   pub name: String,
   pub path: PathBuf,
   pub data: T,

@@ -19,7 +19,7 @@ pub struct FileTestMapperStrategy<
   /// Base strategy to use for collecting files.
   pub base_strategy: TBaseStrategy,
   /// Map function to map tests to a category or another test.
-  pub map_test: TMapper,
+  pub map: TMapper,
 }
 
 impl<
@@ -42,13 +42,13 @@ impl<
             .push(CollectedCategoryOrTest::Category(self.map_category(c)?));
         }
         CollectedCategoryOrTest::Test(t) => {
-          new_children.push((self.map_test)(t)?);
+          new_children.push((self.map)(t)?);
         }
       }
     }
     Ok(CollectedTestCategory {
       name: category.name,
-      directory_path: category.directory_path,
+      path: category.path,
       children: new_children,
     })
   }
