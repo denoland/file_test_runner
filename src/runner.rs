@@ -14,18 +14,18 @@ use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
 
-pub type RunTestFunc =
-  Arc<dyn (Fn(&CollectedTest) -> TestResult) + Send + Sync>;
+pub type RunTestFunc<TData> =
+  Arc<dyn (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync>;
 
-struct Failure {
-  test: CollectedTest,
+struct Failure<TData> {
+  test: CollectedTest<TData>,
   output: Vec<u8>,
 }
 
-struct Context {
-  thread_pool_runner: Option<ThreadPoolTestRunner>,
-  failures: Vec<Failure>,
-  run_test: RunTestFunc,
+struct Context<TData: Clone + Send + 'static> {
+  thread_pool_runner: Option<ThreadPoolTestRunner<TData>>,
+  failures: Vec<Failure<TData>>,
+  run_test: RunTestFunc<TData>,
 }
 
 static GLOBAL_PANIC_HOOK_COUNT: Mutex<usize> = Mutex::new(0);
@@ -37,7 +37,7 @@ thread_local! {
 }
 
 #[derive(Debug, Clone)]
-pub struct TestStepResult {
+pub struct TestSubTestResult {
   pub name: String,
   pub result: TestResult,
 }
@@ -50,8 +50,8 @@ pub enum TestResult {
   Ignored,
   /// Test failed, returning the captured output of the test.
   Failed { output: Vec<u8> },
-  /// Multiple test steps were run.
-  Steps(Vec<TestStepResult>),
+  /// Multiple sub tests were run.
+  SubTests(Vec<TestSubTestResult>),
 }
 
 impl TestResult {
@@ -59,7 +59,9 @@ impl TestResult {
     match self {
       TestResult::Passed | TestResult::Ignored => false,
       TestResult::Failed { .. } => true,
-      TestResult::Steps(steps) => steps.iter().any(|s| s.result.is_failed()),
+      TestResult::SubTests(sub_tests) => {
+        sub_tests.iter().any(|s| s.result.is_failed())
+      }
     }
   }
 
@@ -123,10 +125,10 @@ pub struct RunOptions {
   pub parallel: bool,
 }
 
-pub fn run_tests(
-  category: &CollectedTestCategory,
+pub fn run_tests<TData: Clone + Send + 'static>(
+  category: &CollectedTestCategory<TData>,
   options: RunOptions,
-  run_test: RunTestFunc,
+  run_test: RunTestFunc<TData>,
 ) {
   let total_tests = category.test_count();
   if total_tests == 0 {
@@ -178,7 +180,10 @@ pub fn run_tests(
   eprintln!();
 }
 
-fn run_category(category: &CollectedTestCategory, context: &mut Context) {
+fn run_category<TData: Clone + Send>(
+  category: &CollectedTestCategory<TData>,
+  context: &mut Context<TData>,
+) {
   let mut tests = Vec::new();
   let mut categories = Vec::new();
   for child in &category.children {
@@ -201,10 +206,10 @@ fn run_category(category: &CollectedTestCategory, context: &mut Context) {
   }
 }
 
-fn run_tests_for_category(
-  category: &CollectedTestCategory,
-  tests: &[&CollectedTest],
-  context: &mut Context,
+fn run_tests_for_category<TData: Clone + Send>(
+  category: &CollectedTestCategory<TData>,
+  tests: &[&CollectedTest<TData>],
+  context: &mut Context<TData>,
 ) {
   if tests.is_empty() {
     return; // ignore empty categories if they exist for some reason
@@ -269,19 +274,19 @@ fn build_end_test_message(
   result: TestResult,
   duration: Duration,
 ) -> (String, Vec<u8>) {
-  fn output_steps(
+  fn output_sub_tests(
     indent: &str,
-    steps: &[TestStepResult],
+    sub_tests: &[TestSubTestResult],
     runner_output: &mut String,
     failure_output: &mut Vec<u8>,
   ) {
-    for step in steps {
-      match &step.result {
+    for sub_test in sub_tests {
+      match &sub_test.result {
         TestResult::Passed => {
           runner_output.push_str(&format!(
             "{}{} {}\n",
             indent,
-            step.name,
+            sub_test.name,
             colors::green_bold("ok"),
           ));
         }
@@ -289,7 +294,7 @@ fn build_end_test_message(
           runner_output.push_str(&format!(
             "{}{} {}\n",
             indent,
-            step.name,
+            sub_test.name,
             colors::gray("ignored"),
           ));
         }
@@ -297,26 +302,28 @@ fn build_end_test_message(
           runner_output.push_str(&format!(
             "{}{} {}\n",
             indent,
-            step.name,
+            sub_test.name,
             colors::red_bold("fail")
           ));
           if !failure_output.is_empty() {
             failure_output.push(b'\n');
           }
+          failure_output
+            .extend(format!("subtest {}\n", sub_test.name).as_bytes());
           failure_output.extend(output);
         }
-        TestResult::Steps(steps) => {
-          runner_output.push_str(&format!("{}{}\n", indent, step.name));
-          if steps.is_empty() {
+        TestResult::SubTests(sub_tests) => {
+          runner_output.push_str(&format!("{}{}\n", indent, sub_test.name));
+          if sub_tests.is_empty() {
             runner_output.push_str(&format!(
               "{}  {}\n",
               indent,
-              colors::gray("<no steps>")
+              colors::gray("<no sub-tests>")
             ));
           } else {
-            output_steps(
+            output_sub_tests(
               &format!("{}  ", indent),
-              steps,
+              sub_tests,
               runner_output,
               failure_output,
             );
@@ -348,9 +355,14 @@ fn build_end_test_message(
       ));
       failure_output = output;
     }
-    TestResult::Steps(steps) => {
+    TestResult::SubTests(sub_tests) => {
       runner_output.push_str(&format!("{}\n", duration_display));
-      output_steps("  ", &steps, &mut runner_output, &mut failure_output);
+      output_sub_tests(
+        "  ",
+        &sub_tests,
+        &mut runner_output,
+        &mut failure_output,
+      );
     }
   }
 
@@ -363,19 +375,23 @@ struct PendingTests {
   pending: HashMap<String, Instant>,
 }
 
-struct ThreadPoolTestRunner {
+struct ThreadPoolTestRunner<TData: Send + 'static> {
   size: usize,
-  sender: crossbeam_channel::Sender<CollectedTest>,
-  receiver: crossbeam_channel::Receiver<(CollectedTest, Duration, TestResult)>,
+  sender: crossbeam_channel::Sender<CollectedTest<TData>>,
+  receiver:
+    crossbeam_channel::Receiver<(CollectedTest<TData>, Duration, TestResult)>,
   pending_tests: Arc<Mutex<PendingTests>>,
 }
 
-impl ThreadPoolTestRunner {
-  pub fn new(size: usize, run_test: RunTestFunc) -> ThreadPoolTestRunner {
+impl<TData: Send + 'static> ThreadPoolTestRunner<TData> {
+  pub fn new(size: usize, run_test: RunTestFunc<TData>) -> Self {
     let pending_tests = Arc::new(Mutex::new(PendingTests::default()));
-    let send_channel = crossbeam_channel::bounded::<CollectedTest>(size);
-    let receive_channel =
-      crossbeam_channel::unbounded::<(CollectedTest, Duration, TestResult)>();
+    let send_channel = crossbeam_channel::bounded::<CollectedTest<TData>>(size);
+    let receive_channel = crossbeam_channel::unbounded::<(
+      CollectedTest<TData>,
+      Duration,
+      TestResult,
+    )>();
     for _ in 0..size {
       let receiver = send_channel.1.clone();
       let sender = receive_channel.0.clone();
@@ -420,7 +436,7 @@ impl ThreadPoolTestRunner {
     }
   }
 
-  pub fn queue_test(&self, test: CollectedTest) {
+  pub fn queue_test(&self, test: CollectedTest<TData>) {
     self
       .pending_tests
       .lock()
@@ -429,7 +445,7 @@ impl ThreadPoolTestRunner {
     self.sender.send(test).unwrap()
   }
 
-  pub fn receive_result(&self) -> (CollectedTest, Duration, TestResult) {
+  pub fn receive_result(&self) -> (CollectedTest<TData>, Duration, TestResult) {
     let data = self.receiver.recv().unwrap();
     self.pending_tests.lock().pending.remove(&data.0.name);
     data
@@ -482,33 +498,33 @@ mod test {
   }
 
   #[test]
-  fn test_build_end_test_message_steps() {
+  fn test_build_end_test_message_sub_tests() {
     let (message, failure_output) = build_end_test_message(
-      super::TestResult::Steps(vec![
-        super::TestStepResult {
+      super::TestResult::SubTests(vec![
+        super::TestSubTestResult {
           name: "step1".to_string(),
           result: super::TestResult::Passed,
         },
-        super::TestStepResult {
+        super::TestSubTestResult {
           name: "step2".to_string(),
           result: super::TestResult::Failed {
             output: b"error1".to_vec(),
           },
         },
-        super::TestStepResult {
+        super::TestSubTestResult {
           name: "step3".to_string(),
           result: super::TestResult::Failed {
             output: b"error2".to_vec(),
           },
         },
-        super::TestStepResult {
+        super::TestSubTestResult {
           name: "step4".to_string(),
-          result: super::TestResult::Steps(vec![
-            super::TestStepResult {
+          result: super::TestResult::SubTests(vec![
+            super::TestSubTestResult {
               name: "sub-step1".to_string(),
               result: super::TestResult::Passed,
             },
-            super::TestStepResult {
+            super::TestSubTestResult {
               name: "sub-step2".to_string(),
               result: super::TestResult::Failed {
                 output: b"error3".to_vec(),

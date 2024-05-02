@@ -29,10 +29,10 @@ impl PathedIoError {
 }
 
 /// Helper function to collect and run the tests.
-pub fn collect_and_run_tests(
-  collect_options: CollectOptions,
+pub fn collect_and_run_tests<TData: Clone + Send + 'static>(
+  collect_options: CollectOptions<TData>,
   run_options: RunOptions,
-  run_test: RunTestFunc,
+  run_test: RunTestFunc<TData>,
 ) {
   let category = collect_tests_or_exit(collect_options);
   run_tests(&category, run_options, run_test)

@@ -23,16 +23,16 @@ pub struct TestPerFileCollectionStrategy {
   pub file_pattern: Option<String>,
 }
 
-impl FileCollectionStrategy for TestPerFileCollectionStrategy {
+impl FileCollectionStrategy<()> for TestPerFileCollectionStrategy {
   fn collect_tests(
     &self,
     base: &Path,
-  ) -> Result<CollectedTestCategory, CollectTestsError> {
+  ) -> Result<CollectedTestCategory<()>, CollectTestsError> {
     fn collect_test_per_file(
       category_name: &str,
       dir_path: &Path,
       pattern: Option<&Regex>,
-    ) -> Result<Vec<CollectedCategoryOrTest>, CollectTestsError> {
+    ) -> Result<Vec<CollectedCategoryOrTest<()>>, CollectTestsError> {
       let mut tests = vec![];
 
       for entry in read_dir_entries(dir_path)? {
@@ -67,6 +67,7 @@ impl FileCollectionStrategy for TestPerFileCollectionStrategy {
               &path.file_stem().unwrap().to_string_lossy(),
             ),
             path,
+            data: (),
           };
           tests.push(CollectedCategoryOrTest::Test(test));
         }
