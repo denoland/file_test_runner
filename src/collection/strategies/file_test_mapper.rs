@@ -7,7 +7,10 @@ use crate::collection::CollectedTestCategory;
 
 use super::FileCollectionStrategy;
 
-/// Maps collected tests
+/// Maps collected tests into categories or other tests.
+///
+/// This is useful if you want to read a file, extract out all the tests,
+/// then map the file into a category of tests.
 #[derive(Debug, Clone)]
 pub struct FileTestMapperStrategy<
   TData: Clone + Send + 'static,

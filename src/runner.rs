@@ -308,8 +308,6 @@ fn build_end_test_message(
           if !failure_output.is_empty() {
             failure_output.push(b'\n');
           }
-          failure_output
-            .extend(format!("subtest {}\n", sub_test.name).as_bytes());
           failure_output.extend(output);
         }
         TestResult::SubTests(sub_tests) => {
@@ -549,6 +547,9 @@ mod test {
       )
     );
 
-    assert_eq!(failure_output, b"error1\nerror2\nerror3");
+    assert_eq!(
+      String::from_utf8(failure_output).unwrap(),
+      "error1\nerror2\nerror3"
+    );
   }
 }
