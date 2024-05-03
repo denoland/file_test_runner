@@ -18,16 +18,16 @@ pub struct TestPerDirectoryCollectionStrategy {
   pub file_name: String,
 }
 
-impl FileCollectionStrategy for TestPerDirectoryCollectionStrategy {
+impl FileCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
   fn collect_tests(
     &self,
     base: &Path,
-  ) -> Result<CollectedTestCategory, CollectTestsError> {
+  ) -> Result<CollectedTestCategory<()>, CollectTestsError> {
     fn collect_test_per_directory(
       category_name: &str,
       dir_path: &Path,
       dir_test_file_name: &str,
-    ) -> Result<Vec<CollectedCategoryOrTest>, CollectTestsError> {
+    ) -> Result<Vec<CollectedCategoryOrTest<()>>, CollectTestsError> {
       let mut tests = vec![];
 
       let mut found_dir = false;
@@ -46,6 +46,7 @@ impl FileCollectionStrategy for TestPerDirectoryCollectionStrategy {
                 &path.file_name().unwrap().to_string_lossy(),
               ),
               path: test_file_path,
+              data: (),
             };
             tests.push(CollectedCategoryOrTest::Test(test));
           } else {
@@ -62,7 +63,7 @@ impl FileCollectionStrategy for TestPerDirectoryCollectionStrategy {
               tests.push(CollectedCategoryOrTest::Category(
                 CollectedTestCategory {
                   name: category_name,
-                  directory_path: path,
+                  path,
                   children,
                 },
               ));
@@ -86,7 +87,7 @@ impl FileCollectionStrategy for TestPerDirectoryCollectionStrategy {
       collect_test_per_directory(&category_name, base, &self.file_name)?;
     Ok(CollectedTestCategory {
       name: category_name.to_string(),
-      directory_path: base.to_path_buf(),
+      path: base.to_path_buf(),
       children,
     })
   }

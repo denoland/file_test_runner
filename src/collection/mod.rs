@@ -12,19 +12,19 @@ use self::strategies::FileCollectionStrategy;
 pub mod strategies;
 
 #[derive(Debug, Clone)]
-pub enum CollectedCategoryOrTest {
-  Category(CollectedTestCategory),
-  Test(CollectedTest),
+pub enum CollectedCategoryOrTest<T = ()> {
+  Category(CollectedTestCategory<T>),
+  Test(CollectedTest<T>),
 }
 
 #[derive(Debug, Clone)]
-pub struct CollectedTestCategory {
+pub struct CollectedTestCategory<T = ()> {
   pub name: String,
-  pub directory_path: PathBuf,
-  pub children: Vec<CollectedCategoryOrTest>,
+  pub path: PathBuf,
+  pub children: Vec<CollectedCategoryOrTest<T>>,
 }
 
-impl CollectedTestCategory {
+impl<T> CollectedTestCategory<T> {
   pub fn test_count(&self) -> usize {
     self
       .children
@@ -65,28 +65,31 @@ impl CollectedTestCategory {
 }
 
 #[derive(Debug, Clone)]
-pub struct CollectedTest {
+pub struct CollectedTest<T = ()> {
   pub name: String,
   pub path: PathBuf,
+  pub data: T,
 }
 
-impl CollectedTest {
+impl<T> CollectedTest<T> {
   pub fn read_to_string(&self) -> Result<String, PathedIoError> {
     std::fs::read_to_string(&self.path)
       .map_err(|err| PathedIoError::new(&self.path, err))
   }
 }
 
-pub struct CollectOptions {
+pub struct CollectOptions<TData> {
   pub base: PathBuf,
-  pub strategy: Box<dyn FileCollectionStrategy>,
+  pub strategy: Box<dyn FileCollectionStrategy<TData>>,
   /// Override the filter provided on the command line.
   ///
   /// Generally, just provide `None` here.
   pub filter_override: Option<String>,
 }
 
-pub fn collect_tests_or_exit(options: CollectOptions) -> CollectedTestCategory {
+pub fn collect_tests_or_exit<TData>(
+  options: CollectOptions<TData>,
+) -> CollectedTestCategory<TData> {
   match collect_tests(options) {
     Ok(category) => category,
     Err(err) => {
@@ -108,9 +111,9 @@ pub enum CollectTestsError {
   Other(#[from] anyhow::Error),
 }
 
-pub fn collect_tests(
-  options: CollectOptions,
-) -> Result<CollectedTestCategory, CollectTestsError> {
+pub fn collect_tests<TData>(
+  options: CollectOptions<TData>,
+) -> Result<CollectedTestCategory<TData>, CollectTestsError> {
   let mut category = options.strategy.collect_tests(&options.base)?;
 
   // error when no tests are found before filtering
@@ -130,8 +133,8 @@ pub fn collect_tests(
   Ok(category)
 }
 
-fn ensure_valid_test_names(
-  category: &CollectedTestCategory,
+fn ensure_valid_test_names<TData>(
+  category: &CollectedTestCategory<TData>,
 ) -> Result<(), InvalidTestNameError> {
   for child in &category.children {
     match child {
