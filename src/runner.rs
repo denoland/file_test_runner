@@ -134,6 +134,7 @@ fn capture_backtrace() -> Option<String> {
     return None;
   }
   let text = format!("{}", backtrace);
+  // strip the code in this crate from the start of the backtrace
   let lines = text.lines().collect::<Vec<_>>();
   let last_position = lines
     .iter()
