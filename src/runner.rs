@@ -94,9 +94,17 @@ impl TestResult {
     LOCAL_PANIC_HOOK.with(|hook| {
       let panic_message = panic_message.clone();
       *hook.borrow_mut() = Some(Box::new(move |info| {
-        panic_message
-          .lock()
-          .extend(format!("{}", info).into_bytes());
+        let backtrace = capture_backtrace();
+        panic_message.lock().extend(
+          format!(
+            "{}{}",
+            info,
+            backtrace
+              .map(|trace| format!("\n{}", trace))
+              .unwrap_or_default()
+          )
+          .into_bytes(),
+        );
       }));
     });
 
@@ -118,6 +126,23 @@ impl TestResult {
         output: panic_message.lock().clone(),
       })
   }
+}
+
+fn capture_backtrace() -> Option<String> {
+  let backtrace = std::backtrace::Backtrace::capture();
+  if backtrace.status() != std::backtrace::BacktraceStatus::Captured {
+    return None;
+  }
+  let text = format!("{}", backtrace);
+  // strip the code in this crate from the start of the backtrace
+  let lines = text.lines().collect::<Vec<_>>();
+  let last_position = lines
+    .iter()
+    .position(|line| line.contains("core::panicking::panic_fmt"));
+  Some(match last_position {
+    Some(position) => lines[position + 2..].join("\n"),
+    None => text,
+  })
 }
 
 #[derive(Debug, Clone)]
