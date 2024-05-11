@@ -16,6 +16,11 @@ use crate::collection::CollectedTestCategory;
 
 /// Strategy for collecting tests.
 pub trait TestCollectionStrategy<TData = ()> {
+  /// Return a list of tests found in the provided base path.
+  ///
+  /// Collected tests may return optional data. This might be useful
+  /// in scenarios where you want to collect multiple tests within
+  /// a file using the `file_test_runner::collection::strategies::FileTestMapperStrategy`.
   fn collect_tests(
     &self,
     base: &Path,
