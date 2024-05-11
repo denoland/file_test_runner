@@ -15,7 +15,7 @@ use crate::collection::CollectTestsError;
 use crate::collection::CollectedTestCategory;
 
 /// Strategy for collecting tests.
-pub trait FileCollectionStrategy<TData = ()> {
+pub trait TestCollectionStrategy<TData = ()> {
   fn collect_tests(
     &self,
     base: &Path,

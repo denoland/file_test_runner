@@ -66,6 +66,12 @@ should be structured.
    // the path to the file on the file system which you can
    // then use to determine how to run your test
    fn run_test(test: &CollectedTest) {
+     // Properties:
+     // * `test.name` - Fully resolved name of the test.
+     // * `test.path` - Path to the test file this test is associated with.
+     // * `test.data` - Data associated with the test that may have been set
+     //                 by the collection strategy.
+
      // helper function to get the text
      let file_text = test.read_to_string().unwrap();
 

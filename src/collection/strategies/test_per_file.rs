@@ -12,18 +12,21 @@ use crate::PathedIoError;
 
 use super::helpers::append_to_category_name;
 use super::helpers::read_dir_entries;
-use super::FileCollectionStrategy;
+use super::TestCollectionStrategy;
 
 /// All the files in every sub directory will be traversed
 /// to find tests that match the pattern.
 ///
 /// Provide `None` to match all files.
+///
+/// Note: This ignores readme.md files and hidden directories
+/// starting with a period.
 #[derive(Debug, Clone, Default)]
 pub struct TestPerFileCollectionStrategy {
   pub file_pattern: Option<String>,
 }
 
-impl FileCollectionStrategy<()> for TestPerFileCollectionStrategy {
+impl TestCollectionStrategy<()> for TestPerFileCollectionStrategy {
   fn collect_tests(
     &self,
     base: &Path,
