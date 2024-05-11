@@ -5,7 +5,7 @@ use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
 
-use super::FileCollectionStrategy;
+use super::TestCollectionStrategy;
 
 /// Maps collected tests into categories or other tests.
 ///
@@ -17,7 +17,7 @@ pub struct FileTestMapperStrategy<
   TMapper: Fn(
     CollectedTest<()>,
   ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
-  TBaseStrategy: FileCollectionStrategy<()>,
+  TBaseStrategy: TestCollectionStrategy<()>,
 > {
   /// Base strategy to use for collecting files.
   pub base_strategy: TBaseStrategy,
@@ -30,7 +30,7 @@ impl<
     TMapper: Fn(
       CollectedTest<()>,
     ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
-    TBaseStrategy: FileCollectionStrategy<()>,
+    TBaseStrategy: TestCollectionStrategy<()>,
   > FileTestMapperStrategy<TData, TMapper, TBaseStrategy>
 {
   fn map_category(
@@ -62,8 +62,8 @@ impl<
     TMapper: Fn(
       CollectedTest<()>,
     ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
-    TBaseStrategy: FileCollectionStrategy<()>,
-  > FileCollectionStrategy<TData>
+    TBaseStrategy: TestCollectionStrategy<()>,
+  > TestCollectionStrategy<TData>
   for FileTestMapperStrategy<TData, TMapper, TBaseStrategy>
 {
   fn collect_tests(

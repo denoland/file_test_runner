@@ -10,15 +10,23 @@ use crate::PathedIoError;
 
 use super::helpers::append_to_category_name;
 use super::helpers::read_dir_entries;
-use super::FileCollectionStrategy;
+use super::TestCollectionStrategy;
 
-/// Once a matching test file is found in a directory, traversing will stop.
+/// Recursively searches directories finding the provided
+/// filename. If a directory sub tree does not contain the file
+/// then an error is raised. Once a matching test file is found
+/// in a directory, traversing will stop.
+///
+/// Note: This ignores hidden directories starting with a period.
 #[derive(Debug, Clone)]
 pub struct TestPerDirectoryCollectionStrategy {
+  /// The file name to search for in each directory.
+  ///
+  /// Example: `__test__.jsonc`
   pub file_name: String,
 }
 
-impl FileCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
+impl TestCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
   fn collect_tests(
     &self,
     base: &Path,
@@ -76,7 +84,7 @@ impl FileCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
       // accidentally not naming the test file correctly
       // (ex. `__test__.json` instead of `__test__.jsonc` in Deno's case)
       if !found_dir {
-        return Err(anyhow::anyhow!("Could not find '{}' in directory tree '{}'. Perhaps the file is named incorrectly.", dir_test_file_name, dir_path.display()).into());
+        return Err(anyhow::anyhow!("Could not find '{}' in directory tree '{}'. Perhaps the file is named incorrectly?", dir_test_file_name, dir_path.display()).into());
       }
 
       Ok(tests)

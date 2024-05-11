@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::PathedIoError;
 
-use self::strategies::FileCollectionStrategy;
+use self::strategies::TestCollectionStrategy;
 
 pub mod strategies;
 
@@ -19,8 +19,12 @@ pub enum CollectedCategoryOrTest<T = ()> {
 
 #[derive(Debug, Clone)]
 pub struct CollectedTestCategory<T = ()> {
+  /// Fully resolved name of the test category.
   pub name: String,
+  /// Path to the test category. May be a file or directory
+  /// depending on how the test strategy collects tests.
   pub path: PathBuf,
+  /// Children of the category.
   pub children: Vec<CollectedCategoryOrTest<T>>,
 }
 
@@ -66,12 +70,17 @@ impl<T> CollectedTestCategory<T> {
 
 #[derive(Debug, Clone)]
 pub struct CollectedTest<T = ()> {
+  /// Fully resolved name of the test.
   pub name: String,
+  /// Path to the test file.
   pub path: PathBuf,
+  /// Data associated with the test that may have been
+  /// set by the collection strategy.
   pub data: T,
 }
 
 impl<T> CollectedTest<T> {
+  /// Helper to read the test file to a string.
   pub fn read_to_string(&self) -> Result<String, PathedIoError> {
     std::fs::read_to_string(&self.path)
       .map_err(|err| PathedIoError::new(&self.path, err))
@@ -79,14 +88,17 @@ impl<T> CollectedTest<T> {
 }
 
 pub struct CollectOptions<TData> {
+  /// Base path to start from when searching for tests.
   pub base: PathBuf,
-  pub strategy: Box<dyn FileCollectionStrategy<TData>>,
+  /// Strategy to use for collecting tests.
+  pub strategy: Box<dyn TestCollectionStrategy<TData>>,
   /// Override the filter provided on the command line.
   ///
   /// Generally, just provide `None` here.
   pub filter_override: Option<String>,
 }
 
+/// Collect all the tests or exit if there are any errors.
 pub fn collect_tests_or_exit<TData>(
   options: CollectOptions<TData>,
 ) -> CollectedTestCategory<TData> {
