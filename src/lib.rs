@@ -3,6 +3,7 @@
 pub mod collection;
 mod runner;
 
+use collection::CollectedTest;
 pub use runner::*;
 
 use std::path::Path;
@@ -32,7 +33,7 @@ impl PathedIoError {
 pub fn collect_and_run_tests<TData: Clone + Send + 'static>(
   collect_options: CollectOptions<TData>,
   run_options: RunOptions,
-  run_test: RunTestFunc<TData>,
+  run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
 ) {
   let category = collect_tests_or_exit(collect_options);
   run_tests(&category, run_options, run_test)

@@ -14,7 +14,7 @@ use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
 
-pub type RunTestFunc<TData> =
+type RunTestFunc<TData> =
   Arc<dyn (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync>;
 
 struct Failure<TData> {
@@ -153,7 +153,7 @@ pub struct RunOptions {
 pub fn run_tests<TData: Clone + Send + 'static>(
   category: &CollectedTestCategory<TData>,
   options: RunOptions,
-  run_test: RunTestFunc<TData>,
+  run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
 ) {
   let total_tests = category.test_count();
   if total_tests == 0 {
@@ -171,6 +171,7 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   } else {
     1
   };
+  let run_test = Arc::new(run_test);
   let thread_pool_runner = if parallelism > 1 {
     Some(ThreadPoolTestRunner::new(parallelism, run_test.clone()))
   } else {
