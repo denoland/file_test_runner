@@ -52,13 +52,13 @@ should be structured.
          parallel: false,
        },
        // custom function to run the test...
-       Arc::new(|test| {
+       |test| {
          // do something like this, or do some checks yourself and
          // return a value like TestResult::Passed
          TestResult::from_maybe_panic(AssertUnwindSafe(|| {
           run_test(test);
          }))
-       })
+       }
      )
    }
 
