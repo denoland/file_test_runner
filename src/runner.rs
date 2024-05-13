@@ -147,6 +147,11 @@ fn capture_backtrace() -> Option<String> {
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
+  /// Whether to run tests in parallel. By default, this will parallelize the
+  /// tests across all available threads, minus one.
+  /// 
+  /// This can be overridden by setting the `FILE_TEST_RUNNER_PARALLELISM`
+  /// environment variable to the desired number of parallel threads.
   pub parallel: bool,
 }
 
@@ -161,13 +166,18 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   }
 
   let parallelism = if options.parallel {
-    std::cmp::max(
-      1,
-      std::thread::available_parallelism()
-        .map(|v| v.get())
-        .unwrap_or(2)
-        - 1,
-    )
+    std::env::var("FILE_TEST_RUNNER_PARALLELISM")
+      .ok()
+      .and_then(|v| v.parse().ok())
+      .unwrap_or_else(|| {
+        std::cmp::max(
+          1,
+          std::thread::available_parallelism()
+            .map(|v| v.get())
+            .unwrap_or(2)
+            - 1,
+        )
+      })
   } else {
     1
   };
