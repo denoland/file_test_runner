@@ -105,9 +105,9 @@ impl TestResult {
 
     let panic_message = Arc::new(Mutex::new(Vec::<u8>::new()));
 
-    LOCAL_PANIC_HOOK.with(|hook| {
+    let previous_panic_hook = LOCAL_PANIC_HOOK.with(|hook| {
       let panic_message = panic_message.clone();
-      *hook.borrow_mut() = Some(Box::new(move |info| {
+      hook.borrow_mut().replace(Box::new(move |info| {
         let backtrace = capture_backtrace();
         panic_message.lock().extend(
           format!(
@@ -119,12 +119,17 @@ impl TestResult {
           )
           .into_bytes(),
         );
-      }));
+      }))
     });
 
     let result = std::panic::catch_unwind(func);
 
-    // decrement the panic hook
+    // restore or clear the local panic hook
+    LOCAL_PANIC_HOOK.with(|hook| {
+      *hook.borrow_mut() = previous_panic_hook;
+    });
+
+    // decrement the global panic hook
     {
       let mut hook_count = GLOBAL_PANIC_HOOK_COUNT.lock();
       *hook_count -= 1;
