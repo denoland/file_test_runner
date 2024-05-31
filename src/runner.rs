@@ -72,6 +72,20 @@ impl TestResult {
   pub fn from_maybe_panic(
     func: impl FnOnce() + std::panic::UnwindSafe,
   ) -> Self {
+    Self::from_maybe_panic_or_result(|| {
+      func();
+      TestResult::Passed
+    })
+  }
+
+  /// Allows using a closure that may panic, capturing the panic message and
+  /// returning it as a TestResult::Failed. If a panic does not occur, uses
+  /// the returned TestResult.
+  ///
+  /// Ensure the code is unwind safe and use with `AssertUnwindSafe(|| { /* test code */ })`.
+  pub fn from_maybe_panic_or_result(
+    func: impl FnOnce() -> TestResult + std::panic::UnwindSafe,
+  ) -> Self {
     // increment the panic hook
     {
       let mut hook_count = GLOBAL_PANIC_HOOK_COUNT.lock();
@@ -120,11 +134,9 @@ impl TestResult {
       drop(hook_count); // explicit for clarity, drop after taking the hook
     }
 
-    result
-      .map(|_| TestResult::Passed)
-      .unwrap_or_else(|_| TestResult::Failed {
-        output: panic_message.lock().clone(),
-      })
+    result.unwrap_or_else(|_| TestResult::Failed {
+      output: panic_message.lock().clone(),
+    })
   }
 }
 
