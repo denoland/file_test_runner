@@ -129,7 +129,7 @@ impl TestResult {
       *hook.borrow_mut() = previous_panic_hook;
     });
 
-    // decrement the panic hook
+    // decrement the global panic hook
     {
       let mut hook_count = GLOBAL_PANIC_HOOK_COUNT.lock();
       *hook_count -= 1;
