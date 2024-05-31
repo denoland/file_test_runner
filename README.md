@@ -53,8 +53,9 @@ should be structured.
        },
        // custom function to run the test...
        |test| {
-         // do something like this, or do some checks yourself and
-         // return a value like TestResult::Passed
+         // * do something like this
+         // * or do some checks yourself and return a value like TestResult::Passed
+         // * or use `TestResult::from_maybe_panic_or_result` to combine both of the above
          TestResult::from_maybe_panic(AssertUnwindSafe(|| {
           run_test(test);
          }))
