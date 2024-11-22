@@ -39,7 +39,9 @@ impl TestCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
       let mut tests = vec![];
 
       let mut found_dir = false;
+      let mut is_dir_empty = true;
       for entry in read_dir_entries(dir_path)? {
+        is_dir_empty = false;
         let path = entry.path();
         let file_type = entry
           .file_type()
@@ -83,7 +85,7 @@ impl TestCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
       // Error when the directory file can't be found in order to catch people
       // accidentally not naming the test file correctly
       // (ex. `__test__.json` instead of `__test__.jsonc` in Deno's case)
-      if !found_dir {
+      if !found_dir && !is_dir_empty {
         return Err(anyhow::anyhow!("Could not find '{}' in directory tree '{}'. Perhaps the file is named incorrectly?", dir_test_file_name, dir_path.display()).into());
       }
 
