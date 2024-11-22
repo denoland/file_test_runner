@@ -30,7 +30,7 @@ struct Context<TData: Clone + Send + 'static> {
 
 static GLOBAL_PANIC_HOOK_COUNT: Mutex<usize> = Mutex::new(0);
 
-type PanicHook = Box<dyn Fn(&std::panic::PanicInfo) + Sync + Send>;
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo) + Sync + Send>;
 
 thread_local! {
   static LOCAL_PANIC_HOOK: RefCell<Option<PanicHook>> = RefCell::new(None);
