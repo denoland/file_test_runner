@@ -181,7 +181,7 @@ impl<TData> Default for RunOptions<TData> {
   }
 }
 
-pub fn run_tests<TData: Clone + Send + Sync + 'static>(
+pub fn run_tests<TData: Clone + Send + 'static>(
   category: &CollectedTestCategory<TData>,
   options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
@@ -246,7 +246,7 @@ pub fn run_tests<TData: Clone + Send + Sync + 'static>(
     .report_failures(&context.failures, total_tests);
 }
 
-fn run_category<TData: Clone + Send + Sync>(
+fn run_category<TData: Clone + Send>(
   category: &CollectedTestCategory<TData>,
   context: &mut Context<TData>,
 ) {
