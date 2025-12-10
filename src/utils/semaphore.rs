@@ -1,3 +1,5 @@
+// Copyright 2018-2024 the Deno authors. MIT license.
+
 use parking_lot::Condvar;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;

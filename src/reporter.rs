@@ -9,11 +9,17 @@ use crate::collection::CollectedTestCategory;
 use crate::SubTestResult;
 use crate::TestResult;
 
+#[derive(Clone)]
 pub struct ReporterContext {
   pub is_parallel: bool,
 }
 
-pub trait Reporter<TData = ()> {
+pub struct ReporterFailure<TData> {
+  pub test: CollectedTest<TData>,
+  pub output: Vec<u8>,
+}
+
+pub trait Reporter<TData = ()>: Send + Sync {
   fn report_category_start(
     &self,
     category: &CollectedTestCategory<TData>,
@@ -36,17 +42,17 @@ pub trait Reporter<TData = ()> {
     result: &TestResult,
     context: &ReporterContext,
   );
+  fn report_long_running_test(&self, test_name: &str);
+  fn report_failures(
+    &self,
+    failures: &[ReporterFailure<TData>],
+    total_tests: usize,
+  );
 }
 
-impl<'a, TData> Default for &'a dyn Reporter<TData> {
-  fn default() -> Self {
-    &DefaultReporter
-  }
-}
+pub struct LogReporter;
 
-pub struct DefaultReporter;
-
-impl<TData> Reporter<TData> for DefaultReporter {
+impl<TData> Reporter<TData> for LogReporter {
   fn report_category_start(
     &self,
     category: &CollectedTestCategory<TData>,
@@ -87,6 +93,40 @@ impl<TData> Reporter<TData> for DefaultReporter {
     } else {
       eprint!("{}", runner_output);
     }
+  }
+
+  fn report_long_running_test(&self, test_name: &str) {
+    eprintln!(
+      "test {} has been running for more than 60 seconds",
+      test_name
+    );
+  }
+
+  fn report_failures(
+    &self,
+    failures: &[ReporterFailure<TData>],
+    total_tests: usize,
+  ) {
+    eprintln!();
+    if !failures.is_empty() {
+      eprintln!("spec failures:");
+      eprintln!();
+      for failure in failures {
+        eprintln!("---- {} ----", failure.test.name);
+        eprintln!("{}", String::from_utf8_lossy(&failure.output));
+        eprintln!("Test file: {}", failure.test.path.display());
+        eprintln!();
+      }
+      eprintln!("failures:");
+      for failure in failures {
+        eprintln!("    {}", failure.test.name);
+      }
+      eprintln!();
+      panic!("{} failed of {}", failures.len(), total_tests);
+    } else {
+      eprintln!("{} tests passed", total_tests);
+    }
+    eprintln!();
   }
 }
 

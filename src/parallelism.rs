@@ -2,13 +2,13 @@
 
 use std::num::NonZeroUsize;
 
-use crate::semaphore::Semaphore;
+use crate::utils::Semaphore;
 
 /// Trait to dynamically set the amount of parallelism that
 /// should be done.
 pub trait ParallelismProvider: Send + Sync {
   /// Number of threads that should be created at th estart.
-  fn max_parallelism(&self) -> usize;
+  fn max_parallelism(&self) -> NonZeroUsize;
   /// Called by a thread when the test starts.
   ///
   /// The implementation can block in this call in order
@@ -28,6 +28,10 @@ impl Parallelism {
       max: max_parallelism,
       sempahore: Semaphore::new(max_parallelism.get()),
     }
+  }
+
+  pub fn none() -> Self {
+    Self::new(NonZeroUsize::new(1).unwrap())
   }
 
   /// By default, this will parallelize the tests across all available
@@ -61,8 +65,8 @@ impl Parallelism {
 }
 
 impl ParallelismProvider for Parallelism {
-  fn max_parallelism(&self) -> usize {
-    self.max.get()
+  fn max_parallelism(&self) -> NonZeroUsize {
+    self.max
   }
 
   fn on_test_start(&self) {

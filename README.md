@@ -36,7 +36,6 @@ should be structured.
    use file_test_runner::collection::CollectedTest;
    use file_test_runner::collection::CollectOptions;
    use file_test_runner::collection::strategies::TestPerFileCollectionStrategy;
-   use file_test_runner::parallelism::Parallelism;
    use file_test_runner::RunOptions;
    use file_test_runner::TestResult;
 
@@ -49,10 +48,8 @@ should be structured.
          }),
          filter_override: None,
        },
-       RunOptions {
-         parallelism: Arc::new(Parallelism::from_env()),
-         reporter: &Default::default(),
-       },
+       // the run options provide a way to set the reporter or parallelism
+       RunOptions::default(),
        // custom function to run the test...
        |test| {
          // * do something like this

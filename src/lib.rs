@@ -4,7 +4,7 @@ pub mod collection;
 pub mod parallelism;
 pub mod reporter;
 mod runner;
-mod semaphore;
+mod utils;
 
 use collection::CollectedTest;
 pub use runner::*;
@@ -33,7 +33,7 @@ impl PathedIoError {
 }
 
 /// Helper function to collect and run the tests.
-pub fn collect_and_run_tests<TData: Clone + Send + 'static>(
+pub fn collect_and_run_tests<TData: Clone + Send + Sync + 'static>(
   collect_options: CollectOptions<TData>,
   run_options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
