@@ -196,6 +196,8 @@ pub fn run_tests<TData: Clone + Send + 'static>(
 
   // Create a rayon thread pool
   let pool = rayon::ThreadPoolBuilder::new()
+    // +2 is one thread for long running tests checker and second
+    // thread is the thread that drives tests into the pool of receivers
     .num_threads(max_parallelism.get() + 2)
     .build()
     .expect("Failed to create thread pool");
