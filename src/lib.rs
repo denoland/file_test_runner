@@ -1,4 +1,4 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 pub mod collection;
 pub mod parallelism;
@@ -12,8 +12,8 @@ pub use runner::*;
 use std::path::Path;
 use std::path::PathBuf;
 
-use collection::collect_tests_or_exit;
 use collection::CollectOptions;
+use collection::collect_tests_or_exit;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -1,7 +1,7 @@
 [package]
 name = "file_test_runner"
 version = "0.7.4"
-edition = "2021"
+edition = "2024"
 description = "File-based test runner for running tests found in files."
 authors = ["the Deno authors"]
 license = "MIT"

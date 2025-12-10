@@ -1,13 +1,13 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::time::Duration;
 
 use deno_terminal::colors;
 
-use crate::collection::CollectedTest;
-use crate::collection::CollectedTestCategory;
 use crate::SubTestResult;
 use crate::TestResult;
+use crate::collection::CollectedTest;
+use crate::collection::CollectedTestCategory;
 
 #[derive(Clone)]
 pub struct ReporterContext {

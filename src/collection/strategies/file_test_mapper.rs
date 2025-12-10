@@ -26,12 +26,12 @@ pub struct FileTestMapperStrategy<
 }
 
 impl<
-    TData: Clone + Send + 'static,
-    TMapper: Fn(
-      CollectedTest<()>,
-    ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
-    TBaseStrategy: TestCollectionStrategy<()>,
-  > FileTestMapperStrategy<TData, TMapper, TBaseStrategy>
+  TData: Clone + Send + 'static,
+  TMapper: Fn(
+    CollectedTest<()>,
+  ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
+  TBaseStrategy: TestCollectionStrategy<()>,
+> FileTestMapperStrategy<TData, TMapper, TBaseStrategy>
 {
   fn map_category(
     &self,
@@ -58,12 +58,12 @@ impl<
 }
 
 impl<
-    TData: Clone + Send + 'static,
-    TMapper: Fn(
-      CollectedTest<()>,
-    ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
-    TBaseStrategy: TestCollectionStrategy<()>,
-  > TestCollectionStrategy<TData>
+  TData: Clone + Send + 'static,
+  TMapper: Fn(
+    CollectedTest<()>,
+  ) -> Result<CollectedCategoryOrTest<TData>, CollectTestsError>,
+  TBaseStrategy: TestCollectionStrategy<()>,
+> TestCollectionStrategy<TData>
   for FileTestMapperStrategy<TData, TMapper, TBaseStrategy>
 {
   fn collect_tests(

@@ -1,4 +1,4 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::path::Path;
 
@@ -13,7 +13,7 @@ pub(crate) fn read_dir_entries(
     .map_err(|err| PathedIoError::new(dir_path, err))?;
   entries.retain(|e| {
     !e.file_name().to_string_lossy().starts_with('.')
-      && e.file_name().to_ascii_lowercase() != "readme.md"
+      && !e.file_name().eq_ignore_ascii_case("readme.md")
   });
   entries.sort_by_key(|a| a.file_name());
   Ok(entries)

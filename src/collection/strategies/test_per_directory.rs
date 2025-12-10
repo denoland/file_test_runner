@@ -1,16 +1,16 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::path::Path;
 
+use crate::PathedIoError;
 use crate::collection::CollectTestsError;
 use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
-use crate::PathedIoError;
 
+use super::TestCollectionStrategy;
 use super::helpers::append_to_category_name;
 use super::helpers::read_dir_entries;
-use super::TestCollectionStrategy;
 
 /// Recursively searches directories finding the provided
 /// filename. If a directory sub tree does not contain the file
