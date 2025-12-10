@@ -1,7 +1,10 @@
 // Copyright 2018-2024 the Deno authors. MIT license.
 
 pub mod collection;
+pub mod parallelism;
+pub mod reporter;
 mod runner;
+mod semaphore;
 
 use collection::CollectedTest;
 pub use runner::*;
@@ -32,7 +35,7 @@ impl PathedIoError {
 /// Helper function to collect and run the tests.
 pub fn collect_and_run_tests<TData: Clone + Send + 'static>(
   collect_options: CollectOptions<TData>,
-  run_options: RunOptions,
+  run_options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
 ) {
   let category = collect_tests_or_exit(collect_options);

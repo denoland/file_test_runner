@@ -36,6 +36,7 @@ should be structured.
    use file_test_runner::collection::CollectedTest;
    use file_test_runner::collection::CollectOptions;
    use file_test_runner::collection::strategies::TestPerFileCollectionStrategy;
+   use file_test_runner::parallelism::Parallelism;
    use file_test_runner::RunOptions;
    use file_test_runner::TestResult;
 
@@ -49,7 +50,8 @@ should be structured.
          filter_override: None,
        },
        RunOptions {
-         parallel: false,
+         parallelism: Arc::new(Parallelism::from_env()),
+         reporter: &Default::default(),
        },
        // custom function to run the test...
        |test| {
@@ -57,7 +59,7 @@ should be structured.
          // * or do some checks yourself and return a value like TestResult::Passed
          // * or use `TestResult::from_maybe_panic_or_result` to combine both of the above
          TestResult::from_maybe_panic(AssertUnwindSafe(|| {
-          run_test(test);
+           run_test(test);
          }))
        }
      )

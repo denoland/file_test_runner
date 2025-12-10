@@ -7,12 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use deno_terminal::colors;
 use parking_lot::Mutex;
 
 use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
+use crate::parallelism::ParallelismProvider;
+use crate::reporter::Reporter;
+use crate::reporter::ReporterContext;
 
 type RunTestFunc<TData> =
   Arc<dyn (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync>;
@@ -22,10 +24,11 @@ struct Failure<TData> {
   output: Vec<u8>,
 }
 
-struct Context<TData: Clone + Send + 'static> {
-  thread_pool_runner: Option<ThreadPoolTestRunner<TData>>,
+struct Context<'a, TData: Clone + Send + 'static> {
   failures: Vec<Failure<TData>>,
   run_test: RunTestFunc<TData>,
+  reporter: &'a dyn Reporter<TData>,
+  parallelism: Arc<dyn ParallelismProvider>,
 }
 
 static GLOBAL_PANIC_HOOK_COUNT: Mutex<usize> = Mutex::new(0);
@@ -162,19 +165,15 @@ fn capture_backtrace() -> Option<String> {
   })
 }
 
-#[derive(Debug, Clone)]
-pub struct RunOptions {
-  /// Whether to run tests in parallel. By default, this will parallelize the
-  /// tests across all available threads, minus one.
-  ///
-  /// This can be overridden by setting the `FILE_TEST_RUNNER_PARALLELISM`
-  /// environment variable to the desired number of parallel threads.
-  pub parallel: bool,
+#[derive(Clone)]
+pub struct RunOptions<'a, TData> {
+  pub parallelism: Arc<dyn ParallelismProvider>,
+  pub reporter: &'a dyn Reporter<TData>,
 }
 
 pub fn run_tests<TData: Clone + Send + 'static>(
   category: &CollectedTestCategory<TData>,
-  options: RunOptions,
+  options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
 ) {
   let total_tests = category.test_count();
@@ -182,32 +181,12 @@ pub fn run_tests<TData: Clone + Send + 'static>(
     return; // no tests to run because they were filtered out
   }
 
-  let parallelism = if options.parallel {
-    std::cmp::max(
-      1,
-      std::env::var("FILE_TEST_RUNNER_PARALLELISM")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| {
-          std::thread::available_parallelism()
-            .map(|v| v.get())
-            .unwrap_or(2)
-            - 1
-        }),
-    )
-  } else {
-    1
-  };
   let run_test = Arc::new(run_test);
-  let thread_pool_runner = if parallelism > 1 {
-    Some(ThreadPoolTestRunner::new(parallelism, run_test.clone()))
-  } else {
-    None
-  };
   let mut context = Context {
-    thread_pool_runner,
     failures: Vec::new(),
     run_test,
+    parallelism: options.parallelism,
+    reporter: options.reporter,
   };
   run_category(category, &mut context);
 
@@ -245,13 +224,13 @@ fn run_category<TData: Clone + Send>(
         categories.push(c);
       }
       CollectedCategoryOrTest::Test(t) => {
-        tests.push(t);
+        tests.push(t.clone());
       }
     }
   }
 
   if !tests.is_empty() {
-    run_tests_for_category(category, &tests, context);
+    run_tests_for_category(category, tests, context);
   }
 
   for category in categories {
@@ -261,297 +240,187 @@ fn run_category<TData: Clone + Send>(
 
 fn run_tests_for_category<TData: Clone + Send>(
   category: &CollectedTestCategory<TData>,
-  tests: &[&CollectedTest<TData>],
+  tests: Vec<CollectedTest<TData>>,
   context: &mut Context<TData>,
 ) {
+  enum SendMessage<TData> {
+    Start {
+      test: CollectedTest<TData>,
+    },
+    Result {
+      test: CollectedTest<TData>,
+      duration: Duration,
+      result: TestResult,
+    },
+  }
+
+  #[derive(Default)]
+  struct PendingTests {
+    finished: bool,
+    pending: HashMap<String, Instant>,
+  }
+
   if tests.is_empty() {
     return; // ignore empty categories if they exist for some reason
   }
-
-  eprintln!();
-  eprintln!("     {} {}", colors::green_bold("Running"), category.name);
-  eprintln!();
-
-  if let Some(runner) = context
-    .thread_pool_runner
-    .as_ref()
-    .filter(|_| tests.len() > 1)
-  {
-    let mut test_iterator = tests.iter();
-    let mut pending = tests.len();
-    let mut thread_pool_pending = runner.size;
-    while pending > 0 {
-      while thread_pool_pending > 0 {
-        if let Some(test) = test_iterator.next() {
-          runner.queue_test((*test).clone());
-          thread_pool_pending -= 1;
-        } else {
-          break;
+  let reporter = &context.reporter;
+  let max_parallel = context.parallelism.max_parallelism();
+  let pending_tests = Arc::new(Mutex::new(PendingTests::default()));
+  let (send_sender, send_receiver) =
+    crossbeam_channel::bounded::<CollectedTest<TData>>(max_parallel);
+  let (receiver_sender, receive_receiver) =
+    crossbeam_channel::unbounded::<SendMessage<TData>>();
+  for _ in 0..max_parallel {
+    let send_receiver = send_receiver.clone();
+    let sender = receiver_sender.clone();
+    let run_test = context.run_test.clone();
+    let pending_tests = pending_tests.clone();
+    let parallelism = context.parallelism.clone();
+    std::thread::spawn(move || {
+      let run_test = &run_test;
+      while let Ok(test) = send_receiver.recv() {
+        parallelism.on_test_start(); // this could block so put at front
+        let start = Instant::now();
+        if sender
+          .send(SendMessage::Start { test: test.clone() })
+          .is_err()
+        {
+          parallelism.on_test_end();
+          return;
+        }
+        pending_tests
+          .lock()
+          .pending
+          .insert(test.name.clone(), start);
+        let result = (run_test)(&test);
+        parallelism.on_test_end();
+        pending_tests.lock().pending.remove(&test.name);
+        if sender
+          .send(SendMessage::Result {
+            test,
+            duration: start.elapsed(),
+            result,
+          })
+          .is_err()
+        {
+          return;
         }
       }
-      let (test, duration, result) = runner.receive_result();
-      let is_failure = result.is_failed();
-      let (runner_output, failure_output) =
-        build_end_test_message(result, duration);
-      eprint!("test {} ... {}", test.name, runner_output);
-      if is_failure {
-        context.failures.push(Failure {
-          test,
-          output: failure_output,
-        });
-      }
+    });
+  }
 
-      pending -= 1;
-      thread_pool_pending += 1;
+  // thread that checks for any long running tests
+  std::thread::spawn({
+    let pending_tests = pending_tests.clone();
+    move || loop {
+      std::thread::sleep(std::time::Duration::from_secs(5));
+      let mut data = pending_tests.lock();
+      if data.finished {
+        break;
+      }
+      let mut long_tests = Vec::new();
+      for (key, value) in &data.pending {
+        if value.elapsed().as_secs() > 60 {
+          long_tests.push(key.clone());
+        }
+      }
+      for test in long_tests {
+        eprintln!("test {} has been running for more than 60 seconds", test);
+        data.pending.remove(&test);
+      }
     }
-  } else {
+  });
+
+  let reporter_context = ReporterContext {
+    is_parallel: max_parallel > 1,
+  };
+  reporter.report_category_start(category, &reporter_context);
+  std::thread::spawn(move || {
     for test in tests {
-      eprint!("test {} ... ", test.name);
-      let start = Instant::now();
-      let result = (context.run_test)(test);
-      let is_failure = result.is_failed();
-      let (runner_output, failure_output) =
-        build_end_test_message(result, start.elapsed());
-      eprint!("{}", runner_output);
-      if is_failure {
-        context.failures.push(Failure {
-          test: (*test).clone(),
-          output: failure_output,
-        });
+      if send_sender.send(test).is_err() {
+        return; // receiver dropped due to fail fast
+      }
+    }
+    drop(send_sender);
+  });
+
+  while let Ok(message) = receive_receiver.recv() {
+    match message {
+      SendMessage::Start { test } => {
+        reporter.report_test_start(&test, &reporter_context);
+      }
+      SendMessage::Result {
+        test,
+        duration,
+        result,
+      } => {
+        reporter.report_test_end(&test, duration, &result, &reporter_context);
+        let is_failure = result.is_failed();
+        let failure_output = collect_failure_output(result);
+        if is_failure {
+          context.failures.push(Failure {
+            test,
+            output: failure_output,
+          });
+        }
       }
     }
   }
+
+  reporter.report_category_end(category, &reporter_context);
+  pending_tests.lock().finished = true;
 }
 
-fn build_end_test_message(
-  result: TestResult,
-  duration: Duration,
-) -> (String, Vec<u8>) {
+fn collect_failure_output(result: TestResult) -> Vec<u8> {
   fn output_sub_tests(
-    indent: &str,
     sub_tests: &[SubTestResult],
-    runner_output: &mut String,
     failure_output: &mut Vec<u8>,
   ) {
     for sub_test in sub_tests {
       match &sub_test.result {
-        TestResult::Passed => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::green_bold("ok"),
-          ));
-        }
-        TestResult::Ignored => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::gray("ignored"),
-          ));
-        }
+        TestResult::Passed | TestResult::Ignored => {}
         TestResult::Failed { output } => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::red_bold("fail")
-          ));
-          if !failure_output.is_empty() {
-            failure_output.push(b'\n');
-          }
           failure_output.extend(output);
         }
         TestResult::SubTests(sub_tests) => {
-          runner_output.push_str(&format!("{}{}\n", indent, sub_test.name));
-          if sub_tests.is_empty() {
-            runner_output.push_str(&format!(
-              "{}  {}\n",
-              indent,
-              colors::gray("<no sub-tests>")
-            ));
-          } else {
-            output_sub_tests(
-              &format!("{}  ", indent),
-              sub_tests,
-              runner_output,
-              failure_output,
-            );
+          if !sub_tests.is_empty() {
+            output_sub_tests(sub_tests, failure_output);
           }
         }
       }
     }
   }
 
-  let mut runner_output = String::new();
-  let duration_display = colors::gray(format!("({}ms)", duration.as_millis()));
   let mut failure_output = Vec::new();
   match result {
-    TestResult::Passed => {
-      runner_output.push_str(&format!(
-        "{} {}\n",
-        colors::green_bold("ok"),
-        duration_display
-      ));
-    }
-    TestResult::Ignored => {
-      runner_output.push_str(&format!("{}\n", colors::gray("ignored")));
-    }
+    TestResult::Passed | TestResult::Ignored => {}
     TestResult::Failed { output } => {
-      runner_output.push_str(&format!(
-        "{} {}\n",
-        colors::red_bold("fail"),
-        duration_display
-      ));
       failure_output = output;
     }
     TestResult::SubTests(sub_tests) => {
-      runner_output.push_str(&format!("{}\n", duration_display));
-      output_sub_tests(
-        "  ",
-        &sub_tests,
-        &mut runner_output,
-        &mut failure_output,
-      );
+      output_sub_tests(&sub_tests, &mut failure_output);
     }
   }
 
-  (runner_output, failure_output)
-}
-
-#[derive(Default)]
-struct PendingTests {
-  finished: bool,
-  pending: HashMap<String, Instant>,
-}
-
-struct ThreadPoolTestRunner<TData: Send + 'static> {
-  size: usize,
-  sender: crossbeam_channel::Sender<CollectedTest<TData>>,
-  receiver:
-    crossbeam_channel::Receiver<(CollectedTest<TData>, Duration, TestResult)>,
-  pending_tests: Arc<Mutex<PendingTests>>,
-}
-
-impl<TData: Send + 'static> ThreadPoolTestRunner<TData> {
-  pub fn new(size: usize, run_test: RunTestFunc<TData>) -> Self {
-    let pending_tests = Arc::new(Mutex::new(PendingTests::default()));
-    let send_channel = crossbeam_channel::bounded::<CollectedTest<TData>>(size);
-    let receive_channel = crossbeam_channel::unbounded::<(
-      CollectedTest<TData>,
-      Duration,
-      TestResult,
-    )>();
-    for _ in 0..size {
-      let receiver = send_channel.1.clone();
-      let sender = receive_channel.0.clone();
-      let run_test = run_test.clone();
-      std::thread::spawn(move || {
-        let run_test = &run_test;
-        while let Ok(value) = receiver.recv() {
-          let start = Instant::now();
-          let result = (run_test)(&value);
-          sender.send((value, start.elapsed(), result)).unwrap();
-        }
-      });
-    }
-
-    // thread that checks for any long running tests
-    std::thread::spawn({
-      let pending_tests = pending_tests.clone();
-      move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        let mut data = pending_tests.lock();
-        if data.finished {
-          break;
-        }
-        let mut long_tests = Vec::new();
-        for (key, value) in &data.pending {
-          if value.elapsed().as_secs() > 60 {
-            long_tests.push(key.clone());
-          }
-        }
-        for test in long_tests {
-          eprintln!("test {} has been running for more than 60 seconds", test);
-          data.pending.remove(&test);
-        }
-      }
-    });
-
-    ThreadPoolTestRunner {
-      size,
-      sender: send_channel.0,
-      receiver: receive_channel.1,
-      pending_tests,
-    }
-  }
-
-  pub fn queue_test(&self, test: CollectedTest<TData>) {
-    self
-      .pending_tests
-      .lock()
-      .pending
-      .insert(test.name.clone(), Instant::now());
-    self.sender.send(test).unwrap()
-  }
-
-  pub fn receive_result(&self) -> (CollectedTest<TData>, Duration, TestResult) {
-    let data = self.receiver.recv().unwrap();
-    self.pending_tests.lock().pending.remove(&data.0.name);
-    data
-  }
+  failure_output
 }
 
 #[cfg(test)]
 mod test {
-  use deno_terminal::colors;
-
   use super::*;
 
   #[test]
-  fn test_build_end_test_message_passed() {
-    assert_eq!(
-      build_end_test_message(
-        super::TestResult::Passed,
-        std::time::Duration::from_millis(100),
-      )
-      .0,
-      format!("{} {}\n", colors::green_bold("ok"), colors::gray("(100ms)"))
-    );
-  }
-
-  #[test]
-  fn test_build_end_test_message_failed() {
-    let (message, failure_output) = build_end_test_message(
-      super::TestResult::Failed {
-        output: b"error".to_vec(),
-      },
-      std::time::Duration::from_millis(100),
-    );
-    assert_eq!(
-      message,
-      format!("{} {}\n", colors::red_bold("fail"), colors::gray("(100ms)"))
-    );
+  fn test_collect_failure_output_failed() {
+    let failure_output = collect_failure_output(super::TestResult::Failed {
+      output: b"error".to_vec(),
+    });
     assert_eq!(failure_output, b"error");
   }
 
   #[test]
-  fn test_build_end_test_message_ignored() {
-    assert_eq!(
-      build_end_test_message(
-        super::TestResult::Ignored,
-        std::time::Duration::from_millis(10),
-      )
-      .0,
-      format!("{}\n", colors::gray("ignored"))
-    );
-  }
-
-  #[test]
-  fn test_build_end_test_message_sub_tests() {
-    let (message, failure_output) = build_end_test_message(
-      super::TestResult::SubTests(vec![
+  fn test_collect_failure_output_sub_tests() {
+    let failure_output =
+      collect_failure_output(super::TestResult::SubTests(vec![
         super::SubTestResult {
           name: "step1".to_string(),
           result: super::TestResult::Passed,
@@ -583,22 +452,7 @@ mod test {
             },
           ]),
         },
-      ]),
-      std::time::Duration::from_millis(10),
-    );
-
-    assert_eq!(
-      message,
-      format!(
-        "{}\n  step1 {}\n  step2 {}\n  step3 {}\n  step4\n    sub-step1 {}\n    sub-step2 {}\n",
-        colors::gray("(10ms)"),
-        colors::green_bold("ok"),
-        colors::red_bold("fail"),
-        colors::red_bold("fail"),
-        colors::green_bold("ok"),
-        colors::red_bold("fail"),
-      )
-    );
+      ]));
 
     assert_eq!(
       String::from_utf8(failure_output).unwrap(),
