@@ -60,9 +60,10 @@ impl TestCollectionStrategy<()> for TestPerFileCollectionStrategy {
           }
         } else if file_type.is_file() {
           if let Some(pattern) = pattern
-            && !pattern.is_match(path.to_str().unwrap()) {
-              continue;
-            }
+            && !pattern.is_match(path.to_str().unwrap())
+          {
+            continue;
+          }
           let test = CollectedTest {
             name: append_to_category_name(
               category_name,
