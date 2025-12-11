@@ -32,6 +32,8 @@ should be structured.
 2. Add a `tests/spec_test.rs` file to run the tests with a main function:
 
    ```rs
+   use std::panic::AssertUnwindSafe;
+
    use file_test_runner::collect_and_run_tests;
    use file_test_runner::collection::CollectedTest;
    use file_test_runner::collection::CollectOptions;

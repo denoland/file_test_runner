@@ -41,3 +41,9 @@ pub fn collect_and_run_tests<TData: Clone + Send + 'static>(
   let category = collect_tests_or_exit(collect_options);
   run_tests(&category, run_options, run_test)
 }
+
+/// Gets if a `--no-capture` or `--nocapture` flag was provided to the cli args.
+pub static NO_CAPTURE: std::sync::LazyLock<bool> =
+  std::sync::LazyLock::new(|| {
+    std::env::args().any(|arg| arg == "--no-capture" || arg == "--nocapture")
+  });

@@ -23,6 +23,7 @@ use super::helpers::read_dir_entries;
 /// starting with a period.
 #[derive(Debug, Clone, Default)]
 pub struct TestPerFileCollectionStrategy {
+  /// The regular expression to match.
   pub file_pattern: Option<String>,
 }
 
@@ -60,7 +61,7 @@ impl TestCollectionStrategy<()> for TestPerFileCollectionStrategy {
           }
         } else if file_type.is_file() {
           if let Some(pattern) = pattern
-            && !pattern.is_match(path.to_str().unwrap())
+            && !pattern.is_match(&path.to_string_lossy())
           {
             continue;
           }
