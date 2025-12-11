@@ -222,11 +222,11 @@ fn ensure_valid_test_names<TData>(
 )]
 pub struct InvalidTestNameError(String);
 
-fn parse_cli_arg_filter() -> Option<String> {
-  let args: Vec<String> = std::env::args().collect();
-  let maybe_filter =
-    args.get(1).filter(|s| !s.starts_with('-') && !s.is_empty());
-  maybe_filter.cloned()
+/// Parses the filter from the CLI args. This can be used
+/// with `category.filter_children(filter)`.
+pub fn parse_cli_arg_filter() -> Option<String> {
+  let args = std::env::args().skip(1).next();
+  args.filter(|s| !s.starts_with('-') && !s.is_empty())
 }
 
 #[cfg(test)]
