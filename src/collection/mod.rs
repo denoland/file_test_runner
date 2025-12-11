@@ -1,4 +1,4 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::path::PathBuf;
 
@@ -169,7 +169,9 @@ fn ensure_valid_test_names<TData>(
 }
 
 #[derive(Debug, Error)]
-#[error("Invalid test name ({0}). Use only alphanumeric and underscore characters so tests can be filtered via the command line.")]
+#[error(
+  "Invalid test name ({0}). Use only alphanumeric and underscore characters so tests can be filtered via the command line."
+)]
 pub struct InvalidTestNameError(String);
 
 fn parse_cli_arg_filter() -> Option<String> {

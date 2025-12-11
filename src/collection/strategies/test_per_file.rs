@@ -1,18 +1,18 @@
-// Copyright 2018-2024 the Deno authors. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::path::Path;
 
 use regex::Regex;
 
+use crate::PathedIoError;
 use crate::collection::CollectTestsError;
 use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
-use crate::PathedIoError;
 
+use super::TestCollectionStrategy;
 use super::helpers::append_to_category_name;
 use super::helpers::read_dir_entries;
-use super::TestCollectionStrategy;
 
 /// All the files in every sub directory will be traversed
 /// to find tests that match the pattern.
@@ -23,6 +23,7 @@ use super::TestCollectionStrategy;
 /// starting with a period.
 #[derive(Debug, Clone, Default)]
 pub struct TestPerFileCollectionStrategy {
+  /// The regular expression to match.
   pub file_pattern: Option<String>,
 }
 
@@ -59,10 +60,10 @@ impl TestCollectionStrategy<()> for TestPerFileCollectionStrategy {
             ));
           }
         } else if file_type.is_file() {
-          if let Some(pattern) = pattern {
-            if !pattern.is_match(path.to_str().unwrap()) {
-              continue;
-            }
+          if let Some(pattern) = pattern
+            && !pattern.is_match(&path.to_string_lossy())
+          {
+            continue;
           }
           let test = CollectedTest {
             name: append_to_category_name(

@@ -32,6 +32,8 @@ should be structured.
 2. Add a `tests/spec_test.rs` file to run the tests with a main function:
 
    ```rs
+   use std::panic::AssertUnwindSafe;
+
    use file_test_runner::collect_and_run_tests;
    use file_test_runner::collection::CollectedTest;
    use file_test_runner::collection::CollectOptions;
@@ -48,16 +50,15 @@ should be structured.
          }),
          filter_override: None,
        },
-       RunOptions {
-         parallel: false,
-       },
+       // the run options provide a way to set the reporter or parallelism
+       RunOptions::default(),
        // custom function to run the test...
        |test| {
          // * do something like this
          // * or do some checks yourself and return a value like TestResult::Passed
          // * or use `TestResult::from_maybe_panic_or_result` to combine both of the above
          TestResult::from_maybe_panic(AssertUnwindSafe(|| {
-          run_test(test);
+           run_test(test);
          }))
        }
      )
