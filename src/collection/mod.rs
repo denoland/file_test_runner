@@ -226,8 +226,7 @@ pub struct InvalidTestNameError(String);
 /// with `category.filter_children(filter)`.
 pub fn parse_cli_arg_filter() -> Option<String> {
   std::env::args()
-    .skip(1)
-    .next()
+    .nth(1)
     .filter(|s| !s.starts_with('-') && !s.is_empty())
 }
 
