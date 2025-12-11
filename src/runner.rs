@@ -279,10 +279,15 @@ fn run_tests_for_category<TData: Clone + Send>(
   tests: Vec<CollectedTest<TData>>,
   context: &mut Context<TData>,
 ) {
-  struct SendMessage<TData> {
-    test: CollectedTest<TData>,
-    duration: Duration,
-    result: TestResult,
+  enum SendMessage<TData> {
+    Start {
+      test: CollectedTest<TData>,
+    },
+    Result {
+      test: CollectedTest<TData>,
+      duration: Duration,
+      result: TestResult,
+    },
   }
 
   if tests.is_empty() {
@@ -307,20 +312,20 @@ fn run_tests_for_category<TData: Clone + Send>(
       let run_test = context.run_test.clone();
       let pending_tests = context.pending_tests.clone();
       let parallelism = context.parallelism.clone();
-      let reporter = context.reporter.clone();
-      let reporter_context = reporter_context.clone();
       context.pool.spawn(move || {
         let run_test = &run_test;
         while let Ok(test) = send_receiver.recv() {
           parallelism.on_test_start(); // this could block so put at front
           let start = Instant::now();
-          reporter.report_test_start(&test, &reporter_context);
+          // it's more deterministic to send this back to the main thread
+          // for when the parallelism is 1
+          _ = sender.send(SendMessage::Start { test: test.clone() });
           pending_tests.lock().insert(test.name.clone(), start);
           let result = (run_test)(&test);
           parallelism.on_test_end();
           pending_tests.lock().remove(&test.name);
           if sender
-            .send(SendMessage {
+            .send(SendMessage::Result {
               test,
               duration: start.elapsed(),
               result,
@@ -345,19 +350,25 @@ fn run_tests_for_category<TData: Clone + Send>(
   };
 
   while let Ok(message) = receive_receiver.recv() {
-    let SendMessage {
-      test,
-      duration,
-      result,
-    } = message;
-    reporter.report_test_end(&test, duration, &result, &reporter_context);
-    let is_failure = result.is_failed();
-    let failure_output = collect_failure_output(result);
-    if is_failure {
-      context.failures.push(ReporterFailure {
+    match message {
+      SendMessage::Start { test } => {
+        reporter.report_test_start(&test, &reporter_context)
+      }
+      SendMessage::Result {
         test,
-        output: failure_output,
-      });
+        duration,
+        result,
+      } => {
+        reporter.report_test_end(&test, duration, &result, &reporter_context);
+        let is_failure = result.is_failed();
+        let failure_output = collect_failure_output(result);
+        if is_failure {
+          context.failures.push(ReporterFailure {
+            test,
+            output: failure_output,
+          });
+        }
+      }
     }
   }
 
