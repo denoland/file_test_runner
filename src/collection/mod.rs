@@ -225,8 +225,10 @@ pub struct InvalidTestNameError(String);
 /// Parses the filter from the CLI args. This can be used
 /// with `category.filter_children(filter)`.
 pub fn parse_cli_arg_filter() -> Option<String> {
-  let args = std::env::args().skip(1).next();
-  args.filter(|s| !s.starts_with('-') && !s.is_empty())
+  std::env::args()
+    .skip(1)
+    .next()
+    .filter(|s| !s.starts_with('-') && !s.is_empty())
 }
 
 #[cfg(test)]
