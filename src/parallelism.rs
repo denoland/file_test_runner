@@ -2,6 +2,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::NO_CAPTURE;
 use crate::utils::Semaphore;
 
 /// Trait to dynamically set the amount of parallelism that
@@ -40,18 +41,22 @@ impl Parallelism {
   /// This can be overridden by setting the `FILE_TEST_RUNNER_PARALLELISM`
   /// environment variable to the desired number of parallel threads.
   pub fn from_env() -> Self {
-    let amount = std::cmp::max(
-      1,
-      std::env::var("FILE_TEST_RUNNER_PARALLELISM")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| {
-          std::thread::available_parallelism()
-            .map(|v| v.get())
-            .unwrap_or(2)
-            - 1
-        }),
-    );
+    let amount = if *NO_CAPTURE {
+      1
+    } else {
+      std::cmp::max(
+        1,
+        std::env::var("FILE_TEST_RUNNER_PARALLELISM")
+          .ok()
+          .and_then(|v| v.parse().ok())
+          .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+              .map(|v| v.get())
+              .unwrap_or(2)
+              - 1
+          }),
+      )
+    };
     Parallelism::new(NonZeroUsize::new(amount).unwrap())
   }
 

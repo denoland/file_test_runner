@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use deno_terminal::colors;
 
+use crate::NO_CAPTURE;
 use crate::SubTestResult;
 use crate::TestResult;
 use crate::collection::CollectedTest;
@@ -76,7 +77,11 @@ impl<TData> Reporter<TData> for LogReporter {
     context: &ReporterContext,
   ) {
     if !context.is_parallel {
-      eprint!("test {} ... ", test.name);
+      if *NO_CAPTURE {
+        eprintln!("test {} ...", test.name);
+      } else {
+        eprint!("test {} ... ", test.name);
+      }
     }
   }
 
