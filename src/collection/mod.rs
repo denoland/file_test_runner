@@ -66,6 +66,54 @@ impl<T> CollectedTestCategory<T> {
 
     true
   }
+
+  /// Splits this category into two separate categories based on a predicate.
+  /// The first category contains tests matching the predicate, the second contains those that don't.
+  /// Both categories preserve the same name and path as the original.
+  pub fn partition<F>(self, predicate: F) -> (Self, Self)
+  where
+    F: Fn(&CollectedTest<T>) -> bool + Copy,
+  {
+    let mut matching_children = Vec::new();
+    let mut non_matching_children = Vec::new();
+
+    for child in self.children {
+      match child {
+        CollectedCategoryOrTest::Category(category) => {
+          let (matching_cat, non_matching_cat) = category.partition(predicate);
+          if !matching_cat.is_empty() {
+            matching_children
+              .push(CollectedCategoryOrTest::Category(matching_cat));
+          }
+          if !non_matching_cat.is_empty() {
+            non_matching_children
+              .push(CollectedCategoryOrTest::Category(non_matching_cat));
+          }
+        }
+        CollectedCategoryOrTest::Test(test) => {
+          if predicate(&test) {
+            matching_children.push(CollectedCategoryOrTest::Test(test));
+          } else {
+            non_matching_children.push(CollectedCategoryOrTest::Test(test));
+          }
+        }
+      }
+    }
+
+    let matching = CollectedTestCategory {
+      name: self.name.clone(),
+      path: self.path.clone(),
+      children: matching_children,
+    };
+
+    let non_matching = CollectedTestCategory {
+      name: self.name,
+      path: self.path,
+      children: non_matching_children,
+    };
+
+    (matching, non_matching)
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -179,4 +227,137 @@ fn parse_cli_arg_filter() -> Option<String> {
   let maybe_filter =
     args.get(1).filter(|s| !s.starts_with('-') && !s.is_empty());
   maybe_filter.cloned()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_partition() {
+    // Create a test category with nested structure
+    let category = CollectedTestCategory {
+      name: "root".to_string(),
+      path: PathBuf::from("/root"),
+      children: vec![
+        CollectedCategoryOrTest::Test(CollectedTest {
+          name: "test_foo".to_string(),
+          path: PathBuf::from("/root/foo.rs"),
+          data: (),
+        }),
+        CollectedCategoryOrTest::Test(CollectedTest {
+          name: "test_bar".to_string(),
+          path: PathBuf::from("/root/bar.rs"),
+          data: (),
+        }),
+        CollectedCategoryOrTest::Category(CollectedTestCategory {
+          name: "nested".to_string(),
+          path: PathBuf::from("/root/nested"),
+          children: vec![
+            CollectedCategoryOrTest::Test(CollectedTest {
+              name: "test_baz".to_string(),
+              path: PathBuf::from("/root/nested/baz.rs"),
+              data: (),
+            }),
+            CollectedCategoryOrTest::Test(CollectedTest {
+              name: "test_qux".to_string(),
+              path: PathBuf::from("/root/nested/qux.rs"),
+              data: (),
+            }),
+          ],
+        }),
+      ],
+    };
+
+    // Partition based on whether name contains "ba"
+    let (matching, non_matching) =
+      category.partition(|test| test.name.contains("ba"));
+
+    // Check matching category
+    assert_eq!(matching.name, "root");
+    assert_eq!(matching.path, PathBuf::from("/root"));
+    assert_eq!(matching.test_count(), 2);
+
+    // Check that matching contains test_bar and nested/test_baz
+    assert_eq!(matching.children.len(), 2);
+    match &matching.children[0] {
+      CollectedCategoryOrTest::Test(test) => assert_eq!(test.name, "test_bar"),
+      _ => panic!("Expected test"),
+    }
+    match &matching.children[1] {
+      CollectedCategoryOrTest::Category(cat) => {
+        assert_eq!(cat.name, "nested");
+        assert_eq!(cat.children.len(), 1);
+        match &cat.children[0] {
+          CollectedCategoryOrTest::Test(test) => {
+            assert_eq!(test.name, "test_baz")
+          }
+          _ => panic!("Expected test"),
+        }
+      }
+      _ => panic!("Expected category"),
+    }
+
+    // Check non-matching category
+    assert_eq!(non_matching.name, "root");
+    assert_eq!(non_matching.path, PathBuf::from("/root"));
+    assert_eq!(non_matching.test_count(), 2);
+
+    // Check that non-matching contains test_foo and nested/test_qux
+    assert_eq!(non_matching.children.len(), 2);
+    match &non_matching.children[0] {
+      CollectedCategoryOrTest::Test(test) => assert_eq!(test.name, "test_foo"),
+      _ => panic!("Expected test"),
+    }
+    match &non_matching.children[1] {
+      CollectedCategoryOrTest::Category(cat) => {
+        assert_eq!(cat.name, "nested");
+        assert_eq!(cat.children.len(), 1);
+        match &cat.children[0] {
+          CollectedCategoryOrTest::Test(test) => {
+            assert_eq!(test.name, "test_qux")
+          }
+          _ => panic!("Expected test"),
+        }
+      }
+      _ => panic!("Expected category"),
+    }
+  }
+
+  #[test]
+  fn test_partition_empty_categories_filtered() {
+    // Create a category where all tests in a nested category match
+    let category = CollectedTestCategory {
+      name: "root".to_string(),
+      path: PathBuf::from("/root"),
+      children: vec![
+        CollectedCategoryOrTest::Test(CollectedTest {
+          name: "test_match".to_string(),
+          path: PathBuf::from("/root/match.rs"),
+          data: (),
+        }),
+        CollectedCategoryOrTest::Category(CollectedTestCategory {
+          name: "nested".to_string(),
+          path: PathBuf::from("/root/nested"),
+          children: vec![CollectedCategoryOrTest::Test(CollectedTest {
+            name: "test_match2".to_string(),
+            path: PathBuf::from("/root/nested/match2.rs"),
+            data: (),
+          })],
+        }),
+      ],
+    };
+
+    let (matching, non_matching) =
+      category.partition(|test| test.name.contains("match"));
+
+    // All tests match, so matching should have everything
+    assert_eq!(matching.test_count(), 2);
+    assert_eq!(matching.children.len(), 2);
+
+    // Non-matching should be empty (no children, and nested category filtered out)
+    assert_eq!(non_matching.test_count(), 0);
+    assert_eq!(non_matching.children.len(), 0);
+    assert!(non_matching.is_empty());
+  }
 }
