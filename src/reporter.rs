@@ -53,6 +53,93 @@ pub trait Reporter<TData = ()>: Send + Sync {
 
 pub struct LogReporter;
 
+impl LogReporter {
+  pub fn build_end_test_message(
+    result: &TestResult,
+    duration: Duration,
+  ) -> String {
+    fn output_sub_tests(
+      indent: &str,
+      sub_tests: &[SubTestResult],
+      runner_output: &mut String,
+    ) {
+      for sub_test in sub_tests {
+        match &sub_test.result {
+          TestResult::Passed => {
+            runner_output.push_str(&format!(
+              "{}{} {}\n",
+              indent,
+              sub_test.name,
+              colors::green_bold("ok"),
+            ));
+          }
+          TestResult::Ignored => {
+            runner_output.push_str(&format!(
+              "{}{} {}\n",
+              indent,
+              sub_test.name,
+              colors::gray("ignored"),
+            ));
+          }
+          TestResult::Failed { .. } => {
+            runner_output.push_str(&format!(
+              "{}{} {}\n",
+              indent,
+              sub_test.name,
+              colors::red_bold("fail")
+            ));
+          }
+          TestResult::SubTests(sub_tests) => {
+            runner_output.push_str(&format!("{}{}\n", indent, sub_test.name));
+            if sub_tests.is_empty() {
+              runner_output.push_str(&format!(
+                "{}  {}\n",
+                indent,
+                colors::gray("<no sub-tests>")
+              ));
+            } else {
+              output_sub_tests(
+                &format!("{}  ", indent),
+                sub_tests,
+                runner_output,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    let mut runner_output = String::new();
+    let duration_display =
+      colors::gray(format!("({}ms)", duration.as_millis()));
+    match result {
+      TestResult::Passed => {
+        runner_output.push_str(&format!(
+          "{} {}\n",
+          colors::green_bold("ok"),
+          duration_display
+        ));
+      }
+      TestResult::Ignored => {
+        runner_output.push_str(&format!("{}\n", colors::gray("ignored")));
+      }
+      TestResult::Failed { .. } => {
+        runner_output.push_str(&format!(
+          "{} {}\n",
+          colors::red_bold("fail"),
+          duration_display
+        ));
+      }
+      TestResult::SubTests(sub_tests) => {
+        runner_output.push_str(&format!("{}\n", duration_display));
+        output_sub_tests("  ", sub_tests, &mut runner_output);
+      }
+    }
+
+    runner_output
+  }
+}
+
 impl<TData> Reporter<TData> for LogReporter {
   fn report_category_start(
     &self,
@@ -92,7 +179,7 @@ impl<TData> Reporter<TData> for LogReporter {
     result: &TestResult,
     context: &ReporterContext,
   ) {
-    let runner_output = build_end_test_message(result, duration);
+    let runner_output = LogReporter::build_end_test_message(result, duration);
     if context.is_parallel {
       eprint!("test {} ... {}", test.name, runner_output);
     } else {
@@ -144,87 +231,6 @@ impl<TData> Reporter<TData> for LogReporter {
   }
 }
 
-fn build_end_test_message(result: &TestResult, duration: Duration) -> String {
-  fn output_sub_tests(
-    indent: &str,
-    sub_tests: &[SubTestResult],
-    runner_output: &mut String,
-  ) {
-    for sub_test in sub_tests {
-      match &sub_test.result {
-        TestResult::Passed => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::green_bold("ok"),
-          ));
-        }
-        TestResult::Ignored => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::gray("ignored"),
-          ));
-        }
-        TestResult::Failed { .. } => {
-          runner_output.push_str(&format!(
-            "{}{} {}\n",
-            indent,
-            sub_test.name,
-            colors::red_bold("fail")
-          ));
-        }
-        TestResult::SubTests(sub_tests) => {
-          runner_output.push_str(&format!("{}{}\n", indent, sub_test.name));
-          if sub_tests.is_empty() {
-            runner_output.push_str(&format!(
-              "{}  {}\n",
-              indent,
-              colors::gray("<no sub-tests>")
-            ));
-          } else {
-            output_sub_tests(
-              &format!("{}  ", indent),
-              sub_tests,
-              runner_output,
-            );
-          }
-        }
-      }
-    }
-  }
-
-  let mut runner_output = String::new();
-  let duration_display = colors::gray(format!("({}ms)", duration.as_millis()));
-  match result {
-    TestResult::Passed => {
-      runner_output.push_str(&format!(
-        "{} {}\n",
-        colors::green_bold("ok"),
-        duration_display
-      ));
-    }
-    TestResult::Ignored => {
-      runner_output.push_str(&format!("{}\n", colors::gray("ignored")));
-    }
-    TestResult::Failed { .. } => {
-      runner_output.push_str(&format!(
-        "{} {}\n",
-        colors::red_bold("fail"),
-        duration_display
-      ));
-    }
-    TestResult::SubTests(sub_tests) => {
-      runner_output.push_str(&format!("{}\n", duration_display));
-      output_sub_tests("  ", sub_tests, &mut runner_output);
-    }
-  }
-
-  runner_output
-}
-
 #[cfg(test)]
 mod test {
   use deno_terminal::colors;
@@ -234,7 +240,7 @@ mod test {
   #[test]
   fn test_build_end_test_message_passed() {
     assert_eq!(
-      build_end_test_message(
+      LogReporter::build_end_test_message(
         &super::TestResult::Passed,
         std::time::Duration::from_millis(100),
       ),
@@ -244,7 +250,7 @@ mod test {
 
   #[test]
   fn test_build_end_test_message_failed() {
-    let message = build_end_test_message(
+    let message = LogReporter::build_end_test_message(
       &super::TestResult::Failed {
         output: b"error".to_vec(),
       },
@@ -259,7 +265,7 @@ mod test {
   #[test]
   fn test_build_end_test_message_ignored() {
     assert_eq!(
-      build_end_test_message(
+      LogReporter::build_end_test_message(
         &super::TestResult::Ignored,
         std::time::Duration::from_millis(10),
       ),
@@ -269,7 +275,7 @@ mod test {
 
   #[test]
   fn test_build_end_test_message_sub_tests() {
-    let message = build_end_test_message(
+    let message = LogReporter::build_end_test_message(
       &super::TestResult::SubTests(vec![
         super::SubTestResult {
           name: "step1".to_string(),
