@@ -54,6 +54,52 @@ pub trait Reporter<TData = ()>: Send + Sync {
 pub struct LogReporter;
 
 impl LogReporter {
+  pub fn write_report_category_start<TData, W: std::io::Write>(
+    writer: &mut W,
+    category: &CollectedTestCategory<TData>,
+  ) -> std::io::Result<()> {
+    writeln!(writer)?;
+    writeln!(
+      writer,
+      "     {} {}",
+      colors::green_bold("Running"),
+      category.name
+    )?;
+    writeln!(writer)?;
+    Ok(())
+  }
+
+
+  pub fn write_report_test_start<TData, W: std::io::Write>(
+    writer: &mut W,
+    test: &CollectedTest<TData>,
+    context: &ReporterContext,
+  ) -> std::io::Result<()> {
+    if !context.is_parallel {
+      if *NO_CAPTURE {
+        writeln!(writer, "test {} ...", test.name)?;
+      } else {
+        write!(writer, "test {} ... ", test.name)?;
+      }
+    }
+    Ok(())
+  }
+
+  pub fn write_report_test_end<TData, W: std::io::Write>(
+    writer: &mut W,
+    test: &CollectedTest<TData>,
+    duration: Duration,
+    result: &TestResult,
+    context: &ReporterContext,
+  ) -> std::io::Result<()> {
+    if context.is_parallel {
+      write!(writer, "test {} ... ", test.name)?;
+    }
+    Self::write_end_test_message(writer, result, duration)?;
+    Ok(())
+  }
+
+  
   pub fn write_end_test_message<W: std::io::Write>(
     writer: &mut W,
     result: &TestResult,
@@ -129,50 +175,6 @@ impl LogReporter {
       }
     }
 
-    Ok(())
-  }
-
-  pub fn write_report_category_start<TData, W: std::io::Write>(
-    writer: &mut W,
-    category: &CollectedTestCategory<TData>,
-  ) -> std::io::Result<()> {
-    writeln!(writer)?;
-    writeln!(
-      writer,
-      "     {} {}",
-      colors::green_bold("Running"),
-      category.name
-    )?;
-    writeln!(writer)?;
-    Ok(())
-  }
-
-  pub fn write_report_test_start<TData, W: std::io::Write>(
-    writer: &mut W,
-    test: &CollectedTest<TData>,
-    context: &ReporterContext,
-  ) -> std::io::Result<()> {
-    if !context.is_parallel {
-      if *NO_CAPTURE {
-        writeln!(writer, "test {} ...", test.name)?;
-      } else {
-        write!(writer, "test {} ... ", test.name)?;
-      }
-    }
-    Ok(())
-  }
-
-  pub fn write_report_test_end<TData, W: std::io::Write>(
-    writer: &mut W,
-    test: &CollectedTest<TData>,
-    duration: Duration,
-    result: &TestResult,
-    context: &ReporterContext,
-  ) -> std::io::Result<()> {
-    if context.is_parallel {
-      write!(writer, "test {} ... ", test.name)?;
-    }
-    Self::write_end_test_message(writer, result, duration)?;
     Ok(())
   }
 
