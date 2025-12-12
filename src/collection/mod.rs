@@ -122,6 +122,8 @@ pub struct CollectedTest<T = ()> {
   pub name: String,
   /// Path to the test file.
   pub path: PathBuf,
+  /// Zero-indexed line and column of the test in the file.
+  pub line_and_column: Option<(u32, u32)>,
   /// Data associated with the test that may have been
   /// set by the collection strategy.
   pub data: T,
@@ -244,11 +246,13 @@ mod tests {
         CollectedCategoryOrTest::Test(CollectedTest {
           name: "test_foo".to_string(),
           path: PathBuf::from("/root/foo.rs"),
+          line_and_column: None,
           data: (),
         }),
         CollectedCategoryOrTest::Test(CollectedTest {
           name: "test_bar".to_string(),
           path: PathBuf::from("/root/bar.rs"),
+          line_and_column: None,
           data: (),
         }),
         CollectedCategoryOrTest::Category(CollectedTestCategory {
@@ -258,11 +262,13 @@ mod tests {
             CollectedCategoryOrTest::Test(CollectedTest {
               name: "test_baz".to_string(),
               path: PathBuf::from("/root/nested/baz.rs"),
+              line_and_column: None,
               data: (),
             }),
             CollectedCategoryOrTest::Test(CollectedTest {
               name: "test_qux".to_string(),
               path: PathBuf::from("/root/nested/qux.rs"),
+              line_and_column: None,
               data: (),
             }),
           ],
@@ -335,6 +341,7 @@ mod tests {
         CollectedCategoryOrTest::Test(CollectedTest {
           name: "test_match".to_string(),
           path: PathBuf::from("/root/match.rs"),
+          line_and_column: None,
           data: (),
         }),
         CollectedCategoryOrTest::Category(CollectedTestCategory {
@@ -343,6 +350,7 @@ mod tests {
           children: vec![CollectedCategoryOrTest::Test(CollectedTest {
             name: "test_match2".to_string(),
             path: PathBuf::from("/root/nested/match2.rs"),
+            line_and_column: None,
             data: (),
           })],
         }),

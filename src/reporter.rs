@@ -119,7 +119,16 @@ impl<TData> Reporter<TData> for LogReporter {
       for failure in failures {
         eprintln!("---- {} ----", failure.test.name);
         eprintln!("{}", String::from_utf8_lossy(&failure.output));
-        eprintln!("Test file: {}", failure.test.path.display());
+        if let Some(line_and_column) = failure.test.line_and_column {
+          eprintln!(
+            "Test file: {}:{}:{}",
+            failure.test.path.display(),
+            line_and_column.0 + 1,
+            line_and_column.1 + 1
+          );
+        } else {
+          eprintln!("Test file: {}", failure.test.path.display());
+        }
         eprintln!();
       }
       eprintln!("failures:");
