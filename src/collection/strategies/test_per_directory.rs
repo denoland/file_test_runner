@@ -56,6 +56,7 @@ impl TestCollectionStrategy<()> for TestPerDirectoryCollectionStrategy {
                 &path.file_name().unwrap().to_string_lossy(),
               ),
               path: test_file_path,
+              line_and_column: None,
               data: (),
             };
             tests.push(CollectedCategoryOrTest::Test(test));

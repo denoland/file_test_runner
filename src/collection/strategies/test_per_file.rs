@@ -71,6 +71,7 @@ impl TestCollectionStrategy<()> for TestPerFileCollectionStrategy {
               &path.file_stem().unwrap().to_string_lossy(),
             ),
             path,
+            line_and_column: None,
             data: (),
           };
           tests.push(CollectedCategoryOrTest::Test(test));
