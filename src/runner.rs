@@ -246,6 +246,9 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   context
     .reporter
     .report_failures(&context.failures, total_tests);
+  if !context.failures.is_empty() {
+    panic!("{} failed of {}", context.failures.len(), total_tests);
+  }
 }
 
 fn run_category<TData: Clone + Send>(

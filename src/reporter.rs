@@ -138,6 +138,42 @@ impl LogReporter {
 
     runner_output
   }
+
+  pub fn write_failures<TData, W: std::io::Write>(
+    writer: &mut W,
+    failures: &[ReporterFailure<TData>],
+    total_tests: usize,
+  ) -> std::io::Result<()> {
+    writeln!(writer)?;
+    if !failures.is_empty() {
+      writeln!(writer, "failures:")?;
+      writeln!(writer)?;
+      for failure in failures {
+        writeln!(writer, "---- {} ----", failure.test.name)?;
+        writeln!(writer, "{}", String::from_utf8_lossy(&failure.output))?;
+        if let Some(line_and_column) = failure.test.line_and_column {
+          writeln!(
+            writer,
+            "Test file: {}:{}:{}",
+            failure.test.path.display(),
+            line_and_column.0 + 1,
+            line_and_column.1 + 1
+          )?;
+        } else {
+          writeln!(writer, "Test file: {}", failure.test.path.display())?;
+        }
+        writeln!(writer)?;
+      }
+      writeln!(writer, "failed tests:")?;
+      for failure in failures {
+        writeln!(writer, "    {}", failure.test.name)?;
+      }
+    } else {
+      writeln!(writer, "{} tests passed", total_tests)?;
+    }
+    writeln!(writer)?;
+    Ok(())
+  }
 }
 
 impl<TData> Reporter<TData> for LogReporter {
@@ -199,35 +235,11 @@ impl<TData> Reporter<TData> for LogReporter {
     failures: &[ReporterFailure<TData>],
     total_tests: usize,
   ) {
-    eprintln!();
-    if !failures.is_empty() {
-      eprintln!("spec failures:");
-      eprintln!();
-      for failure in failures {
-        eprintln!("---- {} ----", failure.test.name);
-        eprintln!("{}", String::from_utf8_lossy(&failure.output));
-        if let Some(line_and_column) = failure.test.line_and_column {
-          eprintln!(
-            "Test file: {}:{}:{}",
-            failure.test.path.display(),
-            line_and_column.0 + 1,
-            line_and_column.1 + 1
-          );
-        } else {
-          eprintln!("Test file: {}", failure.test.path.display());
-        }
-        eprintln!();
-      }
-      eprintln!("failures:");
-      for failure in failures {
-        eprintln!("    {}", failure.test.name);
-      }
-      eprintln!();
-      panic!("{} failed of {}", failures.len(), total_tests);
-    } else {
-      eprintln!("{} tests passed", total_tests);
-    }
-    eprintln!();
+    let _ = LogReporter::write_failures(
+      &mut std::io::stderr(),
+      failures,
+      total_tests,
+    );
   }
 }
 
