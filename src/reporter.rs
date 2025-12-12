@@ -69,7 +69,6 @@ impl LogReporter {
     Ok(())
   }
 
-
   pub fn write_report_test_start<TData, W: std::io::Write>(
     writer: &mut W,
     test: &CollectedTest<TData>,
@@ -99,7 +98,6 @@ impl LogReporter {
     Ok(())
   }
 
-  
   pub fn write_end_test_message<W: std::io::Write>(
     writer: &mut W,
     result: &TestResult,
