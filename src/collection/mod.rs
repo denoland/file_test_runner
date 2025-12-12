@@ -67,6 +67,36 @@ impl<T> CollectedTestCategory<T> {
     true
   }
 
+  /// Flattens all nested categories and returns a new category containing only tests as direct children.
+  /// All subcategories are removed and their tests are moved to the top level.
+  pub fn into_flat_category(self) -> Self {
+    let mut flattened_tests = Vec::new();
+
+    fn collect_tests<T>(
+      children: Vec<CollectedCategoryOrTest<T>>,
+      output: &mut Vec<CollectedCategoryOrTest<T>>,
+    ) {
+      for child in children {
+        match child {
+          CollectedCategoryOrTest::Category(category) => {
+            collect_tests(category.children, output);
+          }
+          CollectedCategoryOrTest::Test(test) => {
+            output.push(CollectedCategoryOrTest::Test(test));
+          }
+        }
+      }
+    }
+
+    collect_tests(self.children, &mut flattened_tests);
+
+    CollectedTestCategory {
+      name: self.name,
+      path: self.path,
+      children: flattened_tests,
+    }
+  }
+
   /// Splits this category into two separate categories based on a predicate.
   /// The first category contains tests matching the predicate, the second contains those that don't.
   /// Both categories preserve the same name and path as the original.
@@ -368,5 +398,85 @@ mod tests {
     assert_eq!(non_matching.test_count(), 0);
     assert_eq!(non_matching.children.len(), 0);
     assert!(non_matching.is_empty());
+  }
+
+  #[test]
+  fn test_into_flat_category() {
+    // Create a nested category structure
+    let category = CollectedTestCategory {
+      name: "root".to_string(),
+      path: PathBuf::from("/root"),
+      children: vec![
+        CollectedCategoryOrTest::Test(CollectedTest {
+          name: "test_1".to_string(),
+          path: PathBuf::from("/root/test1.rs"),
+          line_and_column: None,
+          data: (),
+        }),
+        CollectedCategoryOrTest::Category(CollectedTestCategory {
+          name: "nested1".to_string(),
+          path: PathBuf::from("/root/nested1"),
+          children: vec![
+            CollectedCategoryOrTest::Test(CollectedTest {
+              name: "test_2".to_string(),
+              path: PathBuf::from("/root/nested1/test2.rs"),
+              line_and_column: None,
+              data: (),
+            }),
+            CollectedCategoryOrTest::Category(CollectedTestCategory {
+              name: "deeply_nested".to_string(),
+              path: PathBuf::from("/root/nested1/deeply"),
+              children: vec![CollectedCategoryOrTest::Test(CollectedTest {
+                name: "test_3".to_string(),
+                path: PathBuf::from("/root/nested1/deeply/test3.rs"),
+                line_and_column: None,
+                data: (),
+              })],
+            }),
+          ],
+        }),
+        CollectedCategoryOrTest::Category(CollectedTestCategory {
+          name: "nested2".to_string(),
+          path: PathBuf::from("/root/nested2"),
+          children: vec![CollectedCategoryOrTest::Test(CollectedTest {
+            name: "test_4".to_string(),
+            path: PathBuf::from("/root/nested2/test4.rs"),
+            line_and_column: None,
+            data: (),
+          })],
+        }),
+      ],
+    };
+
+    let flattened = category.into_flat_category();
+
+    // Should preserve root name and path
+    assert_eq!(flattened.name, "root");
+    assert_eq!(flattened.path, PathBuf::from("/root"));
+
+    // Should have 4 direct children, all tests
+    assert_eq!(flattened.children.len(), 4);
+    assert_eq!(flattened.test_count(), 4);
+
+    // All children should be tests, no categories
+    for child in &flattened.children {
+      assert!(matches!(child, CollectedCategoryOrTest::Test(_)));
+    }
+
+    // Verify test names are preserved
+    let test_names: Vec<String> = flattened
+      .children
+      .iter()
+      .filter_map(|child| match child {
+        CollectedCategoryOrTest::Test(test) => Some(test.name.clone()),
+        _ => None,
+      })
+      .collect();
+
+    assert_eq!(test_names.len(), 4);
+    assert!(test_names.contains(&"test_1".to_string()));
+    assert!(test_names.contains(&"test_2".to_string()));
+    assert!(test_names.contains(&"test_3".to_string()));
+    assert!(test_names.contains(&"test_4".to_string()));
   }
 }
