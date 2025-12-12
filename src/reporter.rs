@@ -54,92 +54,141 @@ pub trait Reporter<TData = ()>: Send + Sync {
 pub struct LogReporter;
 
 impl LogReporter {
-  pub fn build_end_test_message(
+  pub fn write_end_test_message<W: std::io::Write>(
+    writer: &mut W,
     result: &TestResult,
     duration: Duration,
-  ) -> String {
-    fn output_sub_tests(
+  ) -> std::io::Result<()> {
+    fn output_sub_tests<W: std::io::Write>(
+      writer: &mut W,
       indent: &str,
       sub_tests: &[SubTestResult],
-      runner_output: &mut String,
-    ) {
+    ) -> std::io::Result<()> {
       for sub_test in sub_tests {
         match &sub_test.result {
           TestResult::Passed => {
-            runner_output.push_str(&format!(
-              "{}{} {}\n",
+            writeln!(
+              writer,
+              "{}{} {}",
               indent,
               sub_test.name,
               colors::green_bold("ok"),
-            ));
+            )?;
           }
           TestResult::Ignored => {
-            runner_output.push_str(&format!(
-              "{}{} {}\n",
+            writeln!(
+              writer,
+              "{}{} {}",
               indent,
               sub_test.name,
               colors::gray("ignored"),
-            ));
+            )?;
           }
           TestResult::Failed { .. } => {
-            runner_output.push_str(&format!(
-              "{}{} {}\n",
+            writeln!(
+              writer,
+              "{}{} {}",
               indent,
               sub_test.name,
               colors::red_bold("fail")
-            ));
+            )?;
           }
           TestResult::SubTests(sub_tests) => {
-            runner_output.push_str(&format!("{}{}\n", indent, sub_test.name));
+            writeln!(writer, "{}{}", indent, sub_test.name)?;
             if sub_tests.is_empty() {
-              runner_output.push_str(&format!(
-                "{}  {}\n",
+              writeln!(
+                writer,
+                "{}  {}",
                 indent,
                 colors::gray("<no sub-tests>")
-              ));
+              )?;
             } else {
-              output_sub_tests(
-                &format!("{}  ", indent),
-                sub_tests,
-                runner_output,
-              );
+              output_sub_tests(writer, &format!("{}  ", indent), sub_tests)?;
             }
           }
         }
       }
+      Ok(())
     }
 
-    let mut runner_output = String::new();
     let duration_display =
       colors::gray(format!("({}ms)", duration.as_millis()));
     match result {
       TestResult::Passed => {
-        runner_output.push_str(&format!(
-          "{} {}\n",
-          colors::green_bold("ok"),
-          duration_display
-        ));
+        writeln!(writer, "{} {}", colors::green_bold("ok"), duration_display)?;
       }
       TestResult::Ignored => {
-        runner_output.push_str(&format!("{}\n", colors::gray("ignored")));
+        writeln!(writer, "{}", colors::gray("ignored"))?;
       }
       TestResult::Failed { .. } => {
-        runner_output.push_str(&format!(
-          "{} {}\n",
-          colors::red_bold("fail"),
-          duration_display
-        ));
+        writeln!(writer, "{} {}", colors::red_bold("fail"), duration_display)?;
       }
       TestResult::SubTests(sub_tests) => {
-        runner_output.push_str(&format!("{}\n", duration_display));
-        output_sub_tests("  ", sub_tests, &mut runner_output);
+        writeln!(writer, "{}", duration_display)?;
+        output_sub_tests(writer, "  ", sub_tests)?;
       }
     }
 
-    runner_output
+    Ok(())
   }
 
-  pub fn write_failures<TData, W: std::io::Write>(
+  pub fn write_report_category_start<TData, W: std::io::Write>(
+    writer: &mut W,
+    category: &CollectedTestCategory<TData>,
+  ) -> std::io::Result<()> {
+    writeln!(writer)?;
+    writeln!(
+      writer,
+      "     {} {}",
+      colors::green_bold("Running"),
+      category.name
+    )?;
+    writeln!(writer)?;
+    Ok(())
+  }
+
+  pub fn write_report_test_start<TData, W: std::io::Write>(
+    writer: &mut W,
+    test: &CollectedTest<TData>,
+    context: &ReporterContext,
+  ) -> std::io::Result<()> {
+    if !context.is_parallel {
+      if *NO_CAPTURE {
+        writeln!(writer, "test {} ...", test.name)?;
+      } else {
+        write!(writer, "test {} ... ", test.name)?;
+      }
+    }
+    Ok(())
+  }
+
+  pub fn write_report_test_end<TData, W: std::io::Write>(
+    writer: &mut W,
+    test: &CollectedTest<TData>,
+    duration: Duration,
+    result: &TestResult,
+    context: &ReporterContext,
+  ) -> std::io::Result<()> {
+    if context.is_parallel {
+      write!(writer, "test {} ... ", test.name)?;
+    }
+    Self::write_end_test_message(writer, result, duration)?;
+    Ok(())
+  }
+
+  pub fn write_report_long_running_test<W: std::io::Write>(
+    writer: &mut W,
+    test_name: &str,
+  ) -> std::io::Result<()> {
+    writeln!(
+      writer,
+      "test {} has been running for more than 60 seconds",
+      test_name
+    )?;
+    Ok(())
+  }
+
+  pub fn write_report_failures<TData, W: std::io::Write>(
     writer: &mut W,
     failures: &[ReporterFailure<TData>],
     total_tests: usize,
@@ -182,9 +231,10 @@ impl<TData> Reporter<TData> for LogReporter {
     category: &CollectedTestCategory<TData>,
     _context: &ReporterContext,
   ) {
-    eprintln!();
-    eprintln!("     {} {}", colors::green_bold("Running"), category.name);
-    eprintln!();
+    let _ = LogReporter::write_report_category_start(
+      &mut std::io::stderr(),
+      category,
+    );
   }
 
   fn report_category_end(
@@ -199,13 +249,11 @@ impl<TData> Reporter<TData> for LogReporter {
     test: &CollectedTest<TData>,
     context: &ReporterContext,
   ) {
-    if !context.is_parallel {
-      if *NO_CAPTURE {
-        eprintln!("test {} ...", test.name);
-      } else {
-        eprint!("test {} ... ", test.name);
-      }
-    }
+    let _ = LogReporter::write_report_test_start(
+      &mut std::io::stderr(),
+      test,
+      context,
+    );
   }
 
   fn report_test_end(
@@ -215,18 +263,19 @@ impl<TData> Reporter<TData> for LogReporter {
     result: &TestResult,
     context: &ReporterContext,
   ) {
-    let runner_output = LogReporter::build_end_test_message(result, duration);
-    if context.is_parallel {
-      eprint!("test {} ... {}", test.name, runner_output);
-    } else {
-      eprint!("{}", runner_output);
-    }
+    let _ = LogReporter::write_report_test_end(
+      &mut std::io::stderr(),
+      test,
+      duration,
+      result,
+      context,
+    );
   }
 
   fn report_long_running_test(&self, test_name: &str) {
-    eprintln!(
-      "test {} has been running for more than 60 seconds",
-      test_name
+    let _ = LogReporter::write_report_long_running_test(
+      &mut std::io::stderr(),
+      test_name,
     );
   }
 
@@ -235,7 +284,7 @@ impl<TData> Reporter<TData> for LogReporter {
     failures: &[ReporterFailure<TData>],
     total_tests: usize,
   ) {
-    let _ = LogReporter::write_failures(
+    let _ = LogReporter::write_report_failures(
       &mut std::io::stderr(),
       failures,
       total_tests,
@@ -249,10 +298,19 @@ mod test {
 
   use super::*;
 
+  fn build_end_test_message(
+    result: &TestResult,
+    duration: std::time::Duration,
+  ) -> String {
+    let mut output = Vec::new();
+    LogReporter::write_end_test_message(&mut output, result, duration).unwrap();
+    String::from_utf8(output).unwrap()
+  }
+
   #[test]
   fn test_build_end_test_message_passed() {
     assert_eq!(
-      LogReporter::build_end_test_message(
+      build_end_test_message(
         &super::TestResult::Passed,
         std::time::Duration::from_millis(100),
       ),
@@ -262,7 +320,7 @@ mod test {
 
   #[test]
   fn test_build_end_test_message_failed() {
-    let message = LogReporter::build_end_test_message(
+    let message = build_end_test_message(
       &super::TestResult::Failed {
         output: b"error".to_vec(),
       },
@@ -277,7 +335,7 @@ mod test {
   #[test]
   fn test_build_end_test_message_ignored() {
     assert_eq!(
-      LogReporter::build_end_test_message(
+      build_end_test_message(
         &super::TestResult::Ignored,
         std::time::Duration::from_millis(10),
       ),
@@ -287,7 +345,7 @@ mod test {
 
   #[test]
   fn test_build_end_test_message_sub_tests() {
-    let message = LogReporter::build_end_test_message(
+    let message = build_end_test_message(
       &super::TestResult::SubTests(vec![
         super::SubTestResult {
           name: "step1".to_string(),
