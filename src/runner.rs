@@ -46,6 +46,7 @@ pub struct SubTestResult {
   pub result: TestResult,
 }
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub enum TestResult {
   /// Test passed.
