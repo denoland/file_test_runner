@@ -64,8 +64,24 @@ impl Parallelism {
   ///
   /// Note that increasing the parallelism beyond the max
   /// parallelism won't do anything.
-  pub fn set_parallelism(&self, parallelism: NonZeroUsize) {
+  pub fn set_max(&self, parallelism: NonZeroUsize) {
     self.sempahore.set_max(parallelism);
+  }
+
+  #[deprecated = "use set_max instead"]
+  pub fn set_parallelism(&self, parallelism: NonZeroUsize) {
+    self.set_max(parallelism);
+  }
+
+  /// Current set parallelism.
+  pub fn current_max(&self) -> usize {
+    self.sempahore.current_max()
+  }
+
+  /// Current amount of active parallelism which may be greater
+  /// or less than the max parallelism.
+  pub fn current_used(&self) -> usize {
+    self.sempahore.current_used()
   }
 }
 

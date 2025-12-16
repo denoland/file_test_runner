@@ -42,6 +42,14 @@ impl Semaphore {
     }
   }
 
+  pub fn current_used(&self) -> usize {
+    self.permits.lock().used
+  }
+
+  pub fn current_max(&self) -> usize {
+    self.permits.lock().max
+  }
+
   pub fn set_max(&self, n: NonZeroUsize) {
     let mut permits = self.permits.lock();
     let is_greater = n.get() > permits.max;
