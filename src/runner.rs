@@ -254,11 +254,22 @@ pub fn run_tests<TData: Clone + Send + 'static>(
       if exit_notify.wait_timeout(std::time::Duration::from_secs(1)) {
         return;
       }
+      let pending = pending_tests.lock().clone();
+      let to_remove = pending
+        .into_iter()
+        .filter_map(|(test_name, start_time)| {
+          if reporter.report_running_test(&test_name, start_time.elapsed()) {
+            Some(test_name)
+          } else {
+            None
+          }
+        })
+        .collect::<Vec<_>>();
       {
-        let mut pending = pending_tests.lock();
-        pending.retain(|test_name, start_time| {
-          !reporter.report_running_test(&test_name, start_time.elapsed())
-        });
+        let mut pending_tests = pending_tests.lock();
+        for key in to_remove {
+          pending_tests.remove(&key);
+        }
       }
     }
   });
