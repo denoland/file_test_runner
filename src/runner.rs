@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -9,11 +10,10 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use rayon::ThreadPool;
 
+use crate::NO_CAPTURE;
 use crate::collection::CollectedCategoryOrTest;
 use crate::collection::CollectedTest;
 use crate::collection::CollectedTestCategory;
-use crate::parallelism::Parallelism;
-use crate::parallelism::ParallelismProvider;
 use crate::reporter::LogReporter;
 use crate::reporter::Reporter;
 use crate::reporter::ReporterContext;
@@ -25,9 +25,9 @@ type RunTestFunc<TData> =
 
 struct Context<TData: Clone + Send + 'static> {
   failures: Vec<ReporterFailure<TData>>,
+  parallelism: NonZeroUsize,
   run_test: RunTestFunc<TData>,
   reporter: Arc<dyn Reporter<TData>>,
-  parallelism: Arc<dyn ParallelismProvider>,
   pending_tests: Arc<Mutex<HashMap<String, Instant>>>,
   pool: ThreadPool,
 }
@@ -50,21 +50,65 @@ pub struct SubTestResult {
 #[derive(Debug, Clone)]
 pub enum TestResult {
   /// Test passed.
-  Passed,
+  Passed {
+    /// Optional duration to report.
+    duration: Option<Duration>,
+  },
   /// Test was ignored.
   Ignored,
   /// Test failed, returning the captured output of the test.
-  Failed { output: Vec<u8> },
+  Failed {
+    /// Optional duration to report.
+    duration: Option<Duration>,
+    /// Test failure output that should be shown to the user.
+    output: Vec<u8>,
+  },
   /// Multiple sub tests were run.
-  SubTests(Vec<SubTestResult>),
+  SubTests {
+    /// Optional duration to report.
+    duration: Option<Duration>,
+    sub_tests: Vec<SubTestResult>,
+  },
 }
 
 impl TestResult {
+  pub fn duration(&self) -> Option<Duration> {
+    match self {
+      TestResult::Passed { duration } => *duration,
+      TestResult::Ignored => None,
+      TestResult::Failed { duration, .. } => *duration,
+      TestResult::SubTests { duration, .. } => *duration,
+    }
+  }
+
+  pub fn with_duration(self, duration: Duration) -> Self {
+    match self {
+      TestResult::Passed { duration: _ } => TestResult::Passed {
+        duration: Some(duration),
+      },
+      TestResult::Ignored => TestResult::Ignored,
+      TestResult::Failed {
+        duration: _,
+        output,
+      } => TestResult::Failed {
+        duration: Some(duration),
+        output,
+      },
+      TestResult::SubTests {
+        duration: _,
+        sub_tests,
+      } => TestResult::SubTests {
+        duration: Some(duration),
+        sub_tests,
+      },
+    }
+  }
+
   pub fn is_failed(&self) -> bool {
     match self {
-      TestResult::Passed | TestResult::Ignored => false,
+      TestResult::Passed { .. } | TestResult::Ignored => false,
       TestResult::Failed { .. } => true,
-      TestResult::SubTests(sub_tests) => {
+      TestResult::SubTests { sub_tests, .. } => {
         sub_tests.iter().any(|s| s.result.is_failed())
       }
     }
@@ -79,7 +123,7 @@ impl TestResult {
   ) -> Self {
     Self::from_maybe_panic_or_result(|| {
       func();
-      TestResult::Passed
+      TestResult::Passed { duration: None }
     })
   }
 
@@ -145,6 +189,7 @@ impl TestResult {
     }
 
     result.unwrap_or_else(|_| TestResult::Failed {
+      duration: None,
       output: panic_message.lock().clone(),
     })
   }
@@ -169,16 +214,38 @@ fn capture_backtrace() -> Option<String> {
 
 #[derive(Clone)]
 pub struct RunOptions<TData> {
-  pub parallelism: Arc<dyn ParallelismProvider>,
+  pub parallelism: NonZeroUsize,
   pub reporter: Arc<dyn Reporter<TData>>,
 }
 
 impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
-      parallelism: Arc::new(Parallelism::from_env()),
+      parallelism: RunOptions::default_parallelism(),
       reporter: Arc::new(LogReporter),
     }
+  }
+}
+
+impl RunOptions<()> {
+  pub fn default_parallelism() -> NonZeroUsize {
+    NonZeroUsize::new(if *NO_CAPTURE {
+      1
+    } else {
+      std::cmp::max(
+        1,
+        std::env::var("FILE_TEST_RUNNER_PARALLELISM")
+          .ok()
+          .and_then(|v| v.parse().ok())
+          .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+              .map(|v| v.get())
+              .unwrap_or(2)
+              - 1
+          }),
+      )
+    })
+    .unwrap()
   }
 }
 
@@ -193,7 +260,7 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   }
 
   let run_test = Arc::new(run_test);
-  let max_parallelism = options.parallelism.max_parallelism();
+  let max_parallelism = options.parallelism;
 
   // Create a rayon thread pool
   let pool = rayon::ThreadPoolBuilder::new()
@@ -213,20 +280,24 @@ pub fn run_tests<TData: Clone + Send + 'static>(
     let reporter = options.reporter.clone();
     let exit_notify = exit_notify.clone();
     move || loop {
-      if exit_notify.wait_timeout(std::time::Duration::from_secs(5)) {
+      if exit_notify.wait_timeout(std::time::Duration::from_secs(1)) {
         return;
       }
-      {
-        let mut pending = pending_tests.lock();
-        let mut long_tests = Vec::new();
-        for (key, value) in pending.iter() {
-          if value.elapsed().as_secs() > 60 {
-            long_tests.push(key.clone());
+      let pending = pending_tests.lock().clone();
+      let to_remove = pending
+        .into_iter()
+        .filter_map(|(test_name, start_time)| {
+          if reporter.report_running_test(&test_name, start_time.elapsed()) {
+            Some(test_name)
+          } else {
+            None
           }
-        }
-        for test in long_tests {
-          reporter.report_long_running_test(&test);
-          pending.remove(&test);
+        })
+        .collect::<Vec<_>>();
+      {
+        let mut pending_tests = pending_tests.lock();
+        for key in to_remove {
+          pending_tests.remove(&key);
         }
       }
     }
@@ -299,7 +370,7 @@ fn run_tests_for_category<TData: Clone + Send>(
   }
 
   let reporter = &context.reporter;
-  let max_parallelism = context.parallelism.max_parallelism().get();
+  let max_parallelism = context.parallelism.get();
   let reporter_context = ReporterContext {
     is_parallel: max_parallelism > 1,
   };
@@ -315,18 +386,15 @@ fn run_tests_for_category<TData: Clone + Send>(
       let sender = receiver_sender.clone();
       let run_test = context.run_test.clone();
       let pending_tests = context.pending_tests.clone();
-      let parallelism = context.parallelism.clone();
       context.pool.spawn(move || {
         let run_test = &run_test;
         while let Ok(test) = send_receiver.recv() {
-          parallelism.on_test_start(); // this could block so put at front
           let start = Instant::now();
           // it's more deterministic to send this back to the main thread
           // for when the parallelism is 1
           _ = sender.send(SendMessage::Start { test: test.clone() });
           pending_tests.lock().insert(test.name.clone(), start);
           let result = (run_test)(&test);
-          parallelism.on_test_end();
           pending_tests.lock().remove(&test.name);
           if sender
             .send(SendMessage::Result {
@@ -386,14 +454,14 @@ fn collect_failure_output(result: TestResult) -> Vec<u8> {
   ) {
     for sub_test in sub_tests {
       match &sub_test.result {
-        TestResult::Passed | TestResult::Ignored => {}
-        TestResult::Failed { output } => {
+        TestResult::Passed { .. } | TestResult::Ignored => {}
+        TestResult::Failed { output, .. } => {
           if !failure_output.is_empty() {
             failure_output.push(b'\n');
           }
           failure_output.extend(output);
         }
-        TestResult::SubTests(sub_tests) => {
+        TestResult::SubTests { sub_tests, .. } => {
           if !sub_tests.is_empty() {
             output_sub_tests(sub_tests, failure_output);
           }
@@ -404,11 +472,11 @@ fn collect_failure_output(result: TestResult) -> Vec<u8> {
 
   let mut failure_output = Vec::new();
   match result {
-    TestResult::Passed | TestResult::Ignored => {}
-    TestResult::Failed { output } => {
+    TestResult::Passed { .. } | TestResult::Ignored => {}
+    TestResult::Failed { output, .. } => {
       failure_output = output;
     }
-    TestResult::SubTests(sub_tests) => {
+    TestResult::SubTests { sub_tests, .. } => {
       output_sub_tests(&sub_tests, &mut failure_output);
     }
   }
@@ -423,6 +491,7 @@ mod test {
   #[test]
   fn test_collect_failure_output_failed() {
     let failure_output = collect_failure_output(super::TestResult::Failed {
+      duration: None,
       output: b"error".to_vec(),
     });
     assert_eq!(failure_output, b"error");
@@ -430,40 +499,48 @@ mod test {
 
   #[test]
   fn test_collect_failure_output_sub_tests() {
-    let failure_output =
-      collect_failure_output(super::TestResult::SubTests(vec![
+    let failure_output = collect_failure_output(super::TestResult::SubTests {
+      duration: None,
+      sub_tests: vec![
         super::SubTestResult {
           name: "step1".to_string(),
-          result: super::TestResult::Passed,
+          result: super::TestResult::Passed { duration: None },
         },
         super::SubTestResult {
           name: "step2".to_string(),
           result: super::TestResult::Failed {
+            duration: None,
             output: b"error1".to_vec(),
           },
         },
         super::SubTestResult {
           name: "step3".to_string(),
           result: super::TestResult::Failed {
+            duration: None,
             output: b"error2".to_vec(),
           },
         },
         super::SubTestResult {
           name: "step4".to_string(),
-          result: super::TestResult::SubTests(vec![
-            super::SubTestResult {
-              name: "sub-step1".to_string(),
-              result: super::TestResult::Passed,
-            },
-            super::SubTestResult {
-              name: "sub-step2".to_string(),
-              result: super::TestResult::Failed {
-                output: b"error3".to_vec(),
+          result: super::TestResult::SubTests {
+            duration: None,
+            sub_tests: vec![
+              super::SubTestResult {
+                name: "sub-step1".to_string(),
+                result: super::TestResult::Passed { duration: None },
               },
-            },
-          ]),
+              super::SubTestResult {
+                name: "sub-step2".to_string(),
+                result: super::TestResult::Failed {
+                  duration: None,
+                  output: b"error3".to_vec(),
+                },
+              },
+            ],
+          },
         },
-      ]));
+      ],
+    });
 
     assert_eq!(
       String::from_utf8(failure_output).unwrap(),

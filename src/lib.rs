@@ -1,7 +1,6 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
 
 pub mod collection;
-pub mod parallelism;
 pub mod reporter;
 mod runner;
 mod utils;

@@ -43,7 +43,12 @@ pub trait Reporter<TData = ()>: Send + Sync {
     result: &TestResult,
     context: &ReporterContext,
   );
-  fn report_long_running_test(&self, test_name: &str);
+  /// Reports all the currently running tests every 1 second until this method
+  /// returns `true` for the test or the test is no longer running.
+  ///
+  /// This can be useful to report a test has been running for too long
+  /// or to update a progress bar with running tests.
+  fn report_running_test(&self, test_name: &str, duration: Duration) -> bool;
   fn report_failures(
     &self,
     failures: &[ReporterFailure<TData>],
@@ -109,36 +114,48 @@ impl LogReporter {
       sub_tests: &[SubTestResult],
     ) -> std::io::Result<()> {
       for sub_test in sub_tests {
+        let duration_display = sub_test
+          .result
+          .duration()
+          .map(|d| format!(" {}", format_duration(d)))
+          .unwrap_or_default();
         match &sub_test.result {
-          TestResult::Passed => {
+          TestResult::Passed { .. } => {
             writeln!(
               writer,
-              "{}{} {}",
+              "{}{} {}{}",
               indent,
               sub_test.name,
               colors::green_bold("ok"),
+              duration_display,
             )?;
           }
           TestResult::Ignored => {
             writeln!(
               writer,
-              "{}{} {}",
+              "{}{} {}{}",
               indent,
               sub_test.name,
               colors::gray("ignored"),
+              duration_display,
             )?;
           }
           TestResult::Failed { .. } => {
             writeln!(
               writer,
-              "{}{} {}",
+              "{}{} {}{}",
               indent,
               sub_test.name,
-              colors::red_bold("fail")
+              colors::red_bold("fail"),
+              duration_display,
             )?;
           }
-          TestResult::SubTests(sub_tests) => {
-            writeln!(writer, "{}{}", indent, sub_test.name)?;
+          TestResult::SubTests { sub_tests, .. } => {
+            writeln!(
+              writer,
+              "{}{}{}",
+              indent, sub_test.name, duration_display
+            )?;
             if sub_tests.is_empty() {
               writeln!(
                 writer,
@@ -156,9 +173,9 @@ impl LogReporter {
     }
 
     let duration_display =
-      colors::gray(format!("({}ms)", duration.as_millis()));
+      format_duration(result.duration().unwrap_or(duration));
     match result {
-      TestResult::Passed => {
+      TestResult::Passed { .. } => {
         writeln!(writer, "{} {}", colors::green_bold("ok"), duration_display)?;
       }
       TestResult::Ignored => {
@@ -167,7 +184,7 @@ impl LogReporter {
       TestResult::Failed { .. } => {
         writeln!(writer, "{} {}", colors::red_bold("fail"), duration_display)?;
       }
-      TestResult::SubTests(sub_tests) => {
+      TestResult::SubTests { sub_tests, .. } => {
         writeln!(writer, "{}", duration_display)?;
         output_sub_tests(writer, "  ", sub_tests)?;
       }
@@ -183,7 +200,7 @@ impl LogReporter {
     writeln!(
       writer,
       "test {} has been running for more than 60 seconds",
-      test_name
+      test_name,
     )?;
     Ok(())
   }
@@ -272,11 +289,16 @@ impl<TData> Reporter<TData> for LogReporter {
     );
   }
 
-  fn report_long_running_test(&self, test_name: &str) {
-    let _ = LogReporter::write_report_long_running_test(
-      &mut std::io::stderr(),
-      test_name,
-    );
+  fn report_running_test(&self, test_name: &str, duration: Duration) -> bool {
+    if duration.as_secs() > 60 {
+      let _ = LogReporter::write_report_long_running_test(
+        &mut std::io::stderr(),
+        test_name,
+      );
+      true
+    } else {
+      false // keep reporting until hit
+    }
   }
 
   fn report_failures(
@@ -290,6 +312,10 @@ impl<TData> Reporter<TData> for LogReporter {
       total_tests,
     );
   }
+}
+
+fn format_duration(duration: Duration) -> colors::Style<String> {
+  colors::gray(format!("({}ms)", duration.as_millis()))
 }
 
 #[cfg(test)]
@@ -311,7 +337,7 @@ mod test {
   fn test_build_end_test_message_passed() {
     assert_eq!(
       build_end_test_message(
-        &super::TestResult::Passed,
+        &super::TestResult::Passed { duration: None },
         std::time::Duration::from_millis(100),
       ),
       format!("{} {}\n", colors::green_bold("ok"), colors::gray("(100ms)"))
@@ -323,6 +349,7 @@ mod test {
     let message = build_end_test_message(
       &super::TestResult::Failed {
         output: b"error".to_vec(),
+        duration: None,
       },
       std::time::Duration::from_millis(100),
     );
@@ -346,50 +373,63 @@ mod test {
   #[test]
   fn test_build_end_test_message_sub_tests() {
     let message = build_end_test_message(
-      &super::TestResult::SubTests(vec![
-        super::SubTestResult {
-          name: "step1".to_string(),
-          result: super::TestResult::Passed,
-        },
-        super::SubTestResult {
-          name: "step2".to_string(),
-          result: super::TestResult::Failed {
-            output: b"error1".to_vec(),
-          },
-        },
-        super::SubTestResult {
-          name: "step3".to_string(),
-          result: super::TestResult::Failed {
-            output: b"error2".to_vec(),
-          },
-        },
-        super::SubTestResult {
-          name: "step4".to_string(),
-          result: super::TestResult::SubTests(vec![
-            super::SubTestResult {
-              name: "sub-step1".to_string(),
-              result: super::TestResult::Passed,
+      &super::TestResult::SubTests {
+        duration: None,
+        sub_tests: vec![
+          super::SubTestResult {
+            name: "step1".to_string(),
+            result: super::TestResult::Passed {
+              duration: Some(Duration::from_millis(20)),
             },
-            super::SubTestResult {
-              name: "sub-step2".to_string(),
-              result: super::TestResult::Failed {
-                output: b"error3".to_vec(),
-              },
+          },
+          super::SubTestResult {
+            name: "step2".to_string(),
+            result: super::TestResult::Failed {
+              duration: None,
+              output: b"error1".to_vec(),
             },
-          ]),
-        },
-      ]),
+          },
+          super::SubTestResult {
+            name: "step3".to_string(),
+            result: super::TestResult::Failed {
+              duration: Some(Duration::from_millis(200)),
+              output: b"error2".to_vec(),
+            },
+          },
+          super::SubTestResult {
+            name: "step4".to_string(),
+            result: super::TestResult::SubTests {
+              duration: None,
+              sub_tests: vec![
+                super::SubTestResult {
+                  name: "sub-step1".to_string(),
+                  result: super::TestResult::Passed { duration: None },
+                },
+                super::SubTestResult {
+                  name: "sub-step2".to_string(),
+                  result: super::TestResult::Failed {
+                    duration: None,
+                    output: b"error3".to_vec(),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
       std::time::Duration::from_millis(10),
     );
 
     assert_eq!(
       message,
       format!(
-        "{}\n  step1 {}\n  step2 {}\n  step3 {}\n  step4\n    sub-step1 {}\n    sub-step2 {}\n",
+        "{}\n  step1 {} {}\n  step2 {}\n  step3 {} {}\n  step4\n    sub-step1 {}\n    sub-step2 {}\n",
         colors::gray("(10ms)"),
         colors::green_bold("ok"),
+        colors::gray("(20ms)"),
         colors::red_bold("fail"),
         colors::red_bold("fail"),
+        colors::gray("(200ms)"),
         colors::green_bold("ok"),
         colors::red_bold("fail"),
       )
