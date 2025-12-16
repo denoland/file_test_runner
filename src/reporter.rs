@@ -43,13 +43,11 @@ pub trait Reporter<TData = ()>: Send + Sync {
     result: &TestResult,
     context: &ReporterContext,
   );
-  /// Reports all the currently running tests every 1 seconds.
+  /// Reports all the currently running tests every 1 second until this method
+  /// returns `true` for the test or the test is no longer running.
   ///
-  /// The implementation should decide when to show that a test
-  /// has been running for too long.
-  ///
-  /// Return `true` to no longer report this test as long running or `false`
-  /// for file_test_runner to keep calling this method for the test.
+  /// This can be useful to report a test has been running for too long
+  /// or to update a progress bar with running tests.
   fn report_running_test(&self, test_name: &str, duration: Duration) -> bool;
   fn report_failures(
     &self,
