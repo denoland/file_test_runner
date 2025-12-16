@@ -198,25 +198,31 @@ pub struct RunOptions<TData> {
 impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
-      parallelism: NonZeroUsize::new(if *NO_CAPTURE {
-        1
-      } else {
-        std::cmp::max(
-          1,
-          std::env::var("FILE_TEST_RUNNER_PARALLELISM")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or_else(|| {
-              std::thread::available_parallelism()
-                .map(|v| v.get())
-                .unwrap_or(2)
-                - 1
-            }),
-        )
-      })
-      .unwrap(),
+      parallelism: Self::default_parallelism(),
       reporter: Arc::new(LogReporter),
     }
+  }
+}
+
+impl<TData> RunOptions<TData> {
+  pub fn default_parallelism() -> NonZeroUsize {
+    NonZeroUsize::new(if *NO_CAPTURE {
+      1
+    } else {
+      std::cmp::max(
+        1,
+        std::env::var("FILE_TEST_RUNNER_PARALLELISM")
+          .ok()
+          .and_then(|v| v.parse().ok())
+          .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+              .map(|v| v.get())
+              .unwrap_or(2)
+              - 1
+          }),
+      )
+    })
+    .unwrap()
   }
 }
 
