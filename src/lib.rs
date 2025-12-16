@@ -3,7 +3,6 @@
 pub mod collection;
 pub mod reporter;
 mod runner;
-mod utils;
 
 use collection::CollectedTest;
 pub use runner::*;

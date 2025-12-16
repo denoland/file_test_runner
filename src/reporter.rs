@@ -1,7 +1,11 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::channel;
 use std::time::Duration;
+use std::time::Instant;
 
 use deno_terminal::colors;
 use parking_lot::Mutex;
@@ -15,12 +19,6 @@ use crate::collection::CollectedTestCategory;
 #[derive(Clone)]
 pub struct ReporterContext {
   pub is_parallel: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RunningTest {
-  pub name: String,
-  pub duration: Duration,
 }
 
 pub struct ReporterFailure<TData> {
@@ -51,11 +49,6 @@ pub trait Reporter<TData = ()>: Send + Sync {
     result: &TestResult,
     context: &ReporterContext,
   );
-  /// Reports all the currently running tests every 1 second.
-  ///
-  /// This can be useful to report a test has been running for too long
-  /// or to update a progress bar with running tests.
-  fn report_running_tests(&self, tests: &[RunningTest]);
   fn report_failures(
     &self,
     failures: &[ReporterFailure<TData>],
@@ -63,9 +56,54 @@ pub trait Reporter<TData = ()>: Send + Sync {
   );
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LogReporter {
-  reported_names: Mutex<HashSet<String>>,
+  pending_tests: Arc<Mutex<HashMap<String, Instant>>>,
+  _tx: std::sync::mpsc::Sender<()>,
+}
+
+impl Default for LogReporter {
+  fn default() -> Self {
+    let (tx, rx) = channel();
+    let pending_tests: Arc<Mutex<HashMap<String, Instant>>> =
+      Default::default();
+    std::thread::spawn({
+      let pending_tests = pending_tests.clone();
+      move || {
+        loop {
+          match rx.recv_timeout(Duration::from_millis(1_000)) {
+            Err(RecvTimeoutError::Timeout) => {
+              let mut tests_to_alert = Vec::new();
+              {
+                let mut data = pending_tests.lock();
+                data.retain(|test_name, instant| {
+                  if instant.elapsed().as_secs() > 60 {
+                    tests_to_alert.push(test_name.clone());
+                    false
+                  } else {
+                    true
+                  }
+                });
+              }
+              let stderr = &mut std::io::stderr();
+              for test_name in tests_to_alert {
+                let _ = LogReporter::write_report_long_running_test(
+                  stderr, &test_name,
+                );
+              }
+            }
+            _ => {
+              return;
+            }
+          }
+        }
+      }
+    });
+    Self {
+      pending_tests,
+      _tx: tx,
+    }
+  }
 }
 
 impl LogReporter {
@@ -276,6 +314,10 @@ impl<TData> Reporter<TData> for LogReporter {
     test: &CollectedTest<TData>,
     context: &ReporterContext,
   ) {
+    self
+      .pending_tests
+      .lock()
+      .insert(test.name.clone(), Instant::now());
     let _ = LogReporter::write_report_test_start(
       &mut std::io::stderr(),
       test,
@@ -290,6 +332,7 @@ impl<TData> Reporter<TData> for LogReporter {
     result: &TestResult,
     context: &ReporterContext,
   ) {
+    self.pending_tests.lock().remove(&test.name);
     let _ = LogReporter::write_report_test_end(
       &mut std::io::stderr(),
       test,
@@ -297,19 +340,6 @@ impl<TData> Reporter<TData> for LogReporter {
       result,
       context,
     );
-  }
-
-  fn report_running_tests(&self, tests: &[RunningTest]) {
-    let mut reported_names = self.reported_names.lock();
-    for test in tests {
-      if test.duration.as_secs() > 60 && !reported_names.contains(&test.name) {
-        reported_names.insert(test.name.clone());
-        let _ = LogReporter::write_report_long_running_test(
-          &mut std::io::stderr(),
-          &test.name,
-        );
-      }
-    }
   }
 
   fn report_failures(
