@@ -1,7 +1,6 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,7 +17,6 @@ use crate::reporter::LogReporter;
 use crate::reporter::Reporter;
 use crate::reporter::ReporterContext;
 use crate::reporter::ReporterFailure;
-use crate::utils::Notify;
 
 type RunTestFunc<TData> =
   Arc<dyn (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync>;
@@ -28,7 +26,6 @@ struct Context<TData: Clone + Send + 'static> {
   parallelism: NonZeroUsize,
   run_test: RunTestFunc<TData>,
   reporter: Arc<dyn Reporter<TData>>,
-  pending_tests: Arc<Mutex<HashMap<String, Instant>>>,
   pool: ThreadPool,
 }
 
@@ -222,7 +219,7 @@ impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
       parallelism: RunOptions::default_parallelism(),
-      reporter: Arc::new(LogReporter),
+      reporter: Arc::new(LogReporter::default()),
     }
   }
 }
@@ -264,44 +261,10 @@ pub fn run_tests<TData: Clone + Send + 'static>(
 
   // Create a rayon thread pool
   let pool = rayon::ThreadPoolBuilder::new()
-    // +2 is one thread for long running tests checker and second
-    // thread is the thread that drives tests into the pool of receivers
-    .num_threads(max_parallelism.get() + 2)
+    // +1 is one thread that drives tests into the pool of receivers
+    .num_threads(max_parallelism.get() + 1)
     .build()
     .expect("Failed to create thread pool");
-
-  // thread that checks for any long running tests
-  let pending_tests = Arc::new(Mutex::new(
-    HashMap::<String, Instant>::with_capacity(max_parallelism.get()),
-  ));
-  let exit_notify = Arc::new(Notify::default());
-  pool.spawn({
-    let pending_tests = pending_tests.clone();
-    let reporter = options.reporter.clone();
-    let exit_notify = exit_notify.clone();
-    move || loop {
-      if exit_notify.wait_timeout(std::time::Duration::from_secs(1)) {
-        return;
-      }
-      let pending = pending_tests.lock().clone();
-      let to_remove = pending
-        .into_iter()
-        .filter_map(|(test_name, start_time)| {
-          if reporter.report_running_test(&test_name, start_time.elapsed()) {
-            Some(test_name)
-          } else {
-            None
-          }
-        })
-        .collect::<Vec<_>>();
-      {
-        let mut pending_tests = pending_tests.lock();
-        for key in to_remove {
-          pending_tests.remove(&key);
-        }
-      }
-    }
-  });
 
   let mut context = Context {
     failures: Vec::new(),
@@ -309,11 +272,8 @@ pub fn run_tests<TData: Clone + Send + 'static>(
     parallelism: options.parallelism,
     reporter: options.reporter,
     pool,
-    pending_tests,
   };
   run_category(category, &mut context);
-
-  exit_notify.notify();
 
   context
     .reporter
@@ -385,7 +345,6 @@ fn run_tests_for_category<TData: Clone + Send>(
       let send_receiver = send_receiver.clone();
       let sender = receiver_sender.clone();
       let run_test = context.run_test.clone();
-      let pending_tests = context.pending_tests.clone();
       context.pool.spawn(move || {
         let run_test = &run_test;
         while let Ok(test) = send_receiver.recv() {
@@ -393,9 +352,7 @@ fn run_tests_for_category<TData: Clone + Send>(
           // it's more deterministic to send this back to the main thread
           // for when the parallelism is 1
           _ = sender.send(SendMessage::Start { test: test.clone() });
-          pending_tests.lock().insert(test.name.clone(), start);
           let result = (run_test)(&test);
-          pending_tests.lock().remove(&test.name);
           if sender
             .send(SendMessage::Result {
               test,
