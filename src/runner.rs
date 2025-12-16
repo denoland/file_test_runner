@@ -81,6 +81,29 @@ impl TestResult {
     }
   }
 
+  pub fn with_duration(self, duration: Duration) -> Self {
+    match self {
+      TestResult::Passed { duration: _ } => TestResult::Passed {
+        duration: Some(duration),
+      },
+      TestResult::Ignored => TestResult::Ignored,
+      TestResult::Failed {
+        duration: _,
+        output,
+      } => TestResult::Failed {
+        duration: Some(duration),
+        output,
+      },
+      TestResult::SubTests {
+        duration: _,
+        sub_tests,
+      } => TestResult::SubTests {
+        duration: Some(duration),
+        sub_tests,
+      },
+    }
+  }
+
   pub fn is_failed(&self) -> bool {
     match self {
       TestResult::Passed { .. } | TestResult::Ignored => false,
