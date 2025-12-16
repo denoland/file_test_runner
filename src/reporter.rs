@@ -1,8 +1,10 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use deno_terminal::colors;
+use parking_lot::Mutex;
 
 use crate::NO_CAPTURE;
 use crate::SubTestResult;
@@ -13,6 +15,12 @@ use crate::collection::CollectedTestCategory;
 #[derive(Clone)]
 pub struct ReporterContext {
   pub is_parallel: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunningTest {
+  pub name: String,
+  pub duration: Duration,
 }
 
 pub struct ReporterFailure<TData> {
@@ -43,12 +51,11 @@ pub trait Reporter<TData = ()>: Send + Sync {
     result: &TestResult,
     context: &ReporterContext,
   );
-  /// Reports all the currently running tests every 1 second until this method
-  /// returns `true` for the test or the test is no longer running.
+  /// Reports all the currently running tests every 1 second.
   ///
   /// This can be useful to report a test has been running for too long
   /// or to update a progress bar with running tests.
-  fn report_running_test(&self, test_name: &str, duration: Duration) -> bool;
+  fn report_running_tests(&self, tests: &[RunningTest]);
   fn report_failures(
     &self,
     failures: &[ReporterFailure<TData>],
@@ -56,7 +63,10 @@ pub trait Reporter<TData = ()>: Send + Sync {
   );
 }
 
-pub struct LogReporter;
+#[derive(Debug, Default)]
+pub struct LogReporter {
+  reported_names: Mutex<HashSet<String>>,
+}
 
 impl LogReporter {
   pub fn write_report_category_start<TData, W: std::io::Write>(
@@ -289,15 +299,16 @@ impl<TData> Reporter<TData> for LogReporter {
     );
   }
 
-  fn report_running_test(&self, test_name: &str, duration: Duration) -> bool {
-    if duration.as_secs() > 60 {
-      let _ = LogReporter::write_report_long_running_test(
-        &mut std::io::stderr(),
-        test_name,
-      );
-      true
-    } else {
-      false // keep reporting until hit
+  fn report_running_tests(&self, tests: &[RunningTest]) {
+    let mut reported_names = self.reported_names.lock();
+    for test in tests {
+      if test.duration.as_secs() > 60 && !reported_names.contains(&test.name) {
+        reported_names.insert(test.name.clone());
+        let _ = LogReporter::write_report_long_running_test(
+          &mut std::io::stderr(),
+          &test.name,
+        );
+      }
     }
   }
 

@@ -18,6 +18,7 @@ use crate::reporter::LogReporter;
 use crate::reporter::Reporter;
 use crate::reporter::ReporterContext;
 use crate::reporter::ReporterFailure;
+use crate::reporter::RunningTest;
 use crate::utils::Notify;
 
 type RunTestFunc<TData> =
@@ -222,7 +223,7 @@ impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
       parallelism: RunOptions::default_parallelism(),
-      reporter: Arc::new(LogReporter),
+      reporter: Arc::new(LogReporter::default()),
     }
   }
 }
@@ -283,23 +284,15 @@ pub fn run_tests<TData: Clone + Send + 'static>(
       if exit_notify.wait_timeout(std::time::Duration::from_secs(1)) {
         return;
       }
-      let pending = pending_tests.lock().clone();
-      let to_remove = pending
-        .into_iter()
-        .filter_map(|(test_name, start_time)| {
-          if reporter.report_running_test(&test_name, start_time.elapsed()) {
-            Some(test_name)
-          } else {
-            None
-          }
+      let running_tests = pending_tests
+        .lock()
+        .iter()
+        .map(|(name, start_time)| RunningTest {
+          name: name.clone(),
+          duration: start_time.elapsed(),
         })
         .collect::<Vec<_>>();
-      {
-        let mut pending_tests = pending_tests.lock();
-        for key in to_remove {
-          pending_tests.remove(&key);
-        }
-      }
+      reporter.report_running_tests(&running_tests);
     }
   });
 
