@@ -221,13 +221,13 @@ pub struct RunOptions<TData> {
 impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
-      parallelism: Self::default_parallelism(),
+      parallelism: RunOptions::default_parallelism(),
       reporter: Arc::new(LogReporter),
     }
   }
 }
 
-impl<TData> RunOptions<TData> {
+impl RunOptions<()> {
   pub fn default_parallelism() -> NonZeroUsize {
     NonZeroUsize::new(if *NO_CAPTURE {
       1
