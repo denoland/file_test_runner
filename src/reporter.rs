@@ -359,6 +359,71 @@ fn format_duration(duration: Duration) -> colors::Style<String> {
   colors::gray(format!("({}ms)", duration.as_millis()))
 }
 
+/// A reporter that aggregates multiple reporters and reports to all of them.
+pub struct AggregateReporter<TData = ()> {
+  reporters: Vec<Box<dyn Reporter<TData>>>,
+}
+
+impl<TData> AggregateReporter<TData> {
+  pub fn new(reporters: Vec<Box<dyn Reporter<TData>>>) -> Self {
+    Self { reporters }
+  }
+}
+
+impl<TData> Reporter<TData> for AggregateReporter<TData> {
+  fn report_category_start(
+    &self,
+    category: &CollectedTestCategory<TData>,
+    context: &ReporterContext,
+  ) {
+    for reporter in &self.reporters {
+      reporter.report_category_start(category, context);
+    }
+  }
+
+  fn report_category_end(
+    &self,
+    category: &CollectedTestCategory<TData>,
+    context: &ReporterContext,
+  ) {
+    for reporter in &self.reporters {
+      reporter.report_category_end(category, context);
+    }
+  }
+
+  fn report_test_start(
+    &self,
+    test: &CollectedTest<TData>,
+    context: &ReporterContext,
+  ) {
+    for reporter in &self.reporters {
+      reporter.report_test_start(test, context);
+    }
+  }
+
+  fn report_test_end(
+    &self,
+    test: &CollectedTest<TData>,
+    duration: Duration,
+    result: &TestResult,
+    context: &ReporterContext,
+  ) {
+    for reporter in &self.reporters {
+      reporter.report_test_end(test, duration, result, context);
+    }
+  }
+
+  fn report_failures(
+    &self,
+    failures: &[ReporterFailure<TData>],
+    total_tests: usize,
+  ) {
+    for reporter in &self.reporters {
+      reporter.report_failures(failures, total_tests);
+    }
+  }
+}
+
 #[cfg(test)]
 mod test {
   use deno_terminal::colors;
