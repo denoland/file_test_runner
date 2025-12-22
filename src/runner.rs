@@ -235,7 +235,7 @@ impl Parallelism {
     if value {
       Default::default()
     } else {
-      Self(NonZeroUsize::new(1).unwrap())
+      Self::from_usize(1)
     }
   }
 
