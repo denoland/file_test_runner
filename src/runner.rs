@@ -23,7 +23,7 @@ type RunTestFunc<TData> =
 
 struct Context<TData: Clone + Send + 'static> {
   failures: Vec<ReporterFailure<TData>>,
-  parallelism: NonZeroUsize,
+  parallelism: Parallelism,
   run_test: RunTestFunc<TData>,
   reporter: Arc<dyn Reporter<TData>>,
   pool: ThreadPool,
@@ -209,40 +209,57 @@ fn capture_backtrace() -> Option<String> {
   })
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Parallelism(NonZeroUsize);
+
+impl Default for Parallelism {
+  fn default() -> Self {
+    Self::from_usize(if *NO_CAPTURE {
+      1
+    } else {
+      std::env::var("FILE_TEST_RUNNER_PARALLELISM")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| {
+          std::thread::available_parallelism()
+            .map(|v| v.get())
+            .unwrap_or(2)
+            - 1
+        })
+    })
+  }
+}
+
+impl Parallelism {
+  pub fn from_bool(value: bool) -> Self {
+    if value {
+      Default::default()
+    } else {
+      Self::from_usize(1)
+    }
+  }
+
+  pub fn from_usize(value: usize) -> Self {
+    Self(NonZeroUsize::new(value).unwrap_or(NonZeroUsize::new(1).unwrap()))
+  }
+
+  pub fn get(&self) -> usize {
+    self.0.get()
+  }
+}
+
 #[derive(Clone)]
 pub struct RunOptions<TData> {
-  pub parallelism: NonZeroUsize,
+  pub parallelism: Parallelism,
   pub reporter: Arc<dyn Reporter<TData>>,
 }
 
 impl<TData> Default for RunOptions<TData> {
   fn default() -> Self {
     Self {
-      parallelism: RunOptions::default_parallelism(),
+      parallelism: Default::default(),
       reporter: Arc::new(LogReporter::default()),
     }
-  }
-}
-
-impl RunOptions<()> {
-  pub fn default_parallelism() -> NonZeroUsize {
-    NonZeroUsize::new(if *NO_CAPTURE {
-      1
-    } else {
-      std::cmp::max(
-        1,
-        std::env::var("FILE_TEST_RUNNER_PARALLELISM")
-          .ok()
-          .and_then(|v| v.parse().ok())
-          .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-              .map(|v| v.get())
-              .unwrap_or(2)
-              - 1
-          }),
-      )
-    })
-    .unwrap()
   }
 }
 
@@ -257,12 +274,11 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   }
 
   let run_test = Arc::new(run_test);
-  let max_parallelism = options.parallelism;
 
   // Create a rayon thread pool
   let pool = rayon::ThreadPoolBuilder::new()
     // +1 is one thread that drives tests into the pool of receivers
-    .num_threads(max_parallelism.get() + 1)
+    .num_threads(options.parallelism.get() + 1)
     .build()
     .expect("Failed to create thread pool");
 
