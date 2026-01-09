@@ -263,14 +263,42 @@ impl<TData> Default for RunOptions<TData> {
   }
 }
 
+/// Output from running tests via `run_tests_getting_output`.
+pub struct TestRunOutput {
+  pub failure_count: usize,
+  pub tests_count: usize,
+}
+
+impl TestRunOutput {
+  /// Panics if any tests failed.
+  pub fn panic_on_failures(&self) {
+    if self.failure_count > 0 {
+      panic!("{} failed of {}", self.failure_count, self.tests_count);
+    }
+  }
+}
+
+/// Runs the tests and panics on failure.
 pub fn run_tests<TData: Clone + Send + 'static>(
   category: &CollectedTestCategory<TData>,
   options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
 ) {
+  run_tests_summary(category, options, run_test).panic_on_failures();
+}
+
+/// Runs the tests returning a summary instead of panicking.
+pub fn run_tests_summary<TData: Clone + Send + 'static>(
+  category: &CollectedTestCategory<TData>,
+  options: RunOptions<TData>,
+  run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
+) -> TestRunOutput {
   let total_tests = category.test_count();
   if total_tests == 0 {
-    return; // no tests to run because they were filtered out
+    return TestRunOutput {
+      failure_count: 0,
+      tests_count: 0,
+    };
   }
 
   let run_test = Arc::new(run_test);
@@ -294,8 +322,10 @@ pub fn run_tests<TData: Clone + Send + 'static>(
   context
     .reporter
     .report_failures(&context.failures, total_tests);
-  if !context.failures.is_empty() {
-    panic!("{} failed of {}", context.failures.len(), total_tests);
+
+  TestRunOutput {
+    failure_count: context.failures.len(),
+    tests_count: total_tests,
   }
 }
 
