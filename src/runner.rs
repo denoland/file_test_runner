@@ -263,7 +263,7 @@ impl<TData> Default for RunOptions<TData> {
   }
 }
 
-/// Output from running tests via `run_tests_getting_output`.
+/// Output from running tests via `run_tests_summary`.
 pub struct TestRunOutput {
   pub failure_count: usize,
   pub tests_count: usize,
