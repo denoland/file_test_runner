@@ -264,12 +264,12 @@ impl<TData> Default for RunOptions<TData> {
 }
 
 /// Output from running tests via `run_tests_summary`.
-pub struct TestRunOutput {
+pub struct TestRunSummary {
   pub failure_count: usize,
   pub tests_count: usize,
 }
 
-impl TestRunOutput {
+impl TestRunSummary {
   /// Panics if any tests failed.
   pub fn panic_on_failures(&self) {
     if self.failure_count > 0 {
@@ -292,10 +292,10 @@ pub fn run_tests_summary<TData: Clone + Send + 'static>(
   category: &CollectedTestCategory<TData>,
   options: RunOptions<TData>,
   run_test: impl (Fn(&CollectedTest<TData>) -> TestResult) + Send + Sync + 'static,
-) -> TestRunOutput {
+) -> TestRunSummary {
   let total_tests = category.test_count();
   if total_tests == 0 {
-    return TestRunOutput {
+    return TestRunSummary {
       failure_count: 0,
       tests_count: 0,
     };
@@ -323,7 +323,7 @@ pub fn run_tests_summary<TData: Clone + Send + 'static>(
     .reporter
     .report_failures(&context.failures, total_tests);
 
-  TestRunOutput {
+  TestRunSummary {
     failure_count: context.failures.len(),
     tests_count: total_tests,
   }
